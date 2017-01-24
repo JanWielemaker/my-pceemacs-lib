@@ -96,6 +96,6 @@ copy_style(thread_local, thread_local(_)).
 
 insert_autocompletion(M, Text:char_array) :->
 	send_super(M, insert_autocompletion, Text),
-	send(M, mark_variable, @on).
+	send(M, mark_variable, @(on)).
 
 :- emacs_end_mode.
