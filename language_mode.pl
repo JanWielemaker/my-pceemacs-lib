@@ -9,6 +9,14 @@
 
 :- module(my_language_mode, []).
 :- use_module(library(pce)).
+:- require([ code_type/2,
+	     member/2,
+	     read_line_to_codes/2,
+	     append/3,
+	     atomic_list_concat/3,
+	     debug/3,
+	     setup_call_cleanup/3
+	   ]).
 
 :- emacs_extend_mode(language,
 		     [ increment_number = key('\\e+')
