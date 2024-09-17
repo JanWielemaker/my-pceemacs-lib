@@ -1,4 +1,4 @@
-# Extending the SWI-Prolog biilt-in editor pceEmacs
+# Extending the SWI-Prolog built-in editor pceEmacs
 
 This  directory holds  some examples  for extending  various modes  in
 pceEmacs.   This  directory  must  be installed  in  a  the  directory
