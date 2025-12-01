@@ -11,7 +11,8 @@
 :- use_module(library(pce)).
 
 :- emacs_extend_mode(fundamental,
-		     [ dos2unix = button(file)
+		     [ dos2unix = button(file),
+                       replace = key('\\e\\S-5')
 		     ]).
 
 dos2unix(M) :->
