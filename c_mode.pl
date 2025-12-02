@@ -30,9 +30,10 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-:- module(my_c_mode, [ lsp_start/1,             % +Options
-                       lsp_stop/0
-                     ]).
+:- module(my_c_mode,
+          [ lsp_start/1,                        % +Options
+            lsp_stop/0
+          ]).
 :- use_module(library(pce)).
 :- use_module(library(process)).
 :- use_module(library(json_rpc_client)).
@@ -85,7 +86,8 @@ lsp_start(Options) :-
     asserta(lsp_connection(Stream)),
     json_full_duplex(Stream,
                      [ header(true)
-                     ]).
+                     ]),
+    at_halt(lsp_stop(Stream)).
 
 clangd_option(Flag, Options) :-
     option(compile_commands_dir(Dir), Options),
@@ -101,13 +103,23 @@ clangd_option(Flag, Options) :-
     format(atom(Flag), '--log=~w', [Level]).
 
 
-%!  lsp_stop
+%!  lsp_stop is det.
+%!  lsp_stop(+Stream) is det.
 %
 %   Stop the LSP server.
 
 lsp_stop :-
+    forall(lsp_connection(Stream),
+           lsp_stop(Stream)).
+
+lsp_stop(Stream) :-
+    lsp_connection(Stream),
+    !,
+    lsp_call(shutdown, _Reply),                 % Reply should be `null`
+    lsp_notify(exit),
     retract(lsp_connection(Stream)),
     close(Stream).
+lsp_stop(_).
 
 %!  lsp_init(+Dir, -Result) is det.
 %
@@ -293,14 +305,20 @@ style_name(Class, Name) :-
 style(lsp(comment),    [colour(orange)]).              % There is a remark on this
 style(lsp(variable),   [colour(red4)]).
 style(lsp(parameter),  [colour(red4), underline(true)]).
-style(lsp(keyword),    [bold(true), colour(blue)]).
 style(lsp(function),   [bold(true)]).
-style(lsp(type),       [colour(navyblue), bold(true)]).
-style(lsp(macro),      [colour(blue)]).
+style(lsp(macro),      [colour('#006e6e')]).
+style(lsp(type),       [colour(blue), underline(true)]).
 style(lsp(enumMember), [colour(magenta)]).
 style(lsp(enum),       [colour(magenta), bold(true)]).
+style(lsp(operator),   [colour(blue)]).
 
 style(comment,         [colour(darkgreen)]).
+style(quoted,          [colour(navyblue)]).
+style(control,         [bold(true), colour(navyblue)]).
+style(type,            [colour(blue)]).
+style(qualifier,       [colour(blue)]).
+style(definition,      [colour(blue)]).
+style(operator,        [colour(blue)]).
 
 
                 /*******************************
@@ -466,7 +484,7 @@ format(Fmt, Args, Head, Tail) :-
 		     ]).
 
 class_variable(auto_colourise_size_limit, int, 400000).
-class_variable(idle_timeout,              num, 0.1).
+class_variable(idle_timeout,              num, 0.3).
 
 setup_mode(M) :->
     "Setup LSP based C mode"::
@@ -501,9 +519,21 @@ colourise_buffer(M) :->
     ->  lsp_highlight(TB)
     ;   send_super(M, colourise_buffer)
     ),
-    send(TB, for_all_comments,
-         create(emacs_c_fragment, TB,
-                @arg1, @arg2 - @arg1, comment)).
+    send(TB, for_all_syntax,
+         message(M, highlight, @arg1, @arg2 - @arg1, @arg3)).
+
+highlight(M, From:int, Len:int, Style:name) :->
+    "Add a highlight fragment"::
+    get(M, text_buffer, TB),
+    adjust_style(Style, M, TB, From, Len, TheStyle),
+    new(_, emacs_c_fragment(TB, From, Len, TheStyle)).
+
+adjust_style(keyword, M, TB, From, Len, Style) =>
+    get(TB, contents, From, Len, string(KeywordS)),
+    atom_string(Keyword, KeywordS),
+    get(M, keyword_type, Keyword, Style).
+adjust_style(Style0, _M, _TB, _From, _Len, Style) =>
+    Style = Style0.
 
 find_definition(M) :->
     "LSP based find definition"::
