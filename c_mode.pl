@@ -66,7 +66,8 @@ library should manage multiple LSP servers for multiple modes.
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
 :- dynamic
-    lsp_connection/1.                           % Stream
+    lsp_connection/1,                           % Stream
+    lsp_buffer/3.                               % URI, Buffer, LSP
 
 :- initialization
     listen(pce_emacs(Event), lsp_event(Event)).
@@ -235,7 +236,9 @@ lsp_highlight(TB) :-
     LSPTime is LSPTime1-LSPTime0,
     send(TB, report, progress,
          'Received %d semantic tokens in %.3f seconds', Tokens, LSPTime),
-    send(TB, for_all_fragments, message(@arg1, free)),
+    send(TB, for_all_fragments,
+         if(message(@arg1, instance_of, emacs_colour_fragment),
+            message(@arg1, free))),
     get_time(FragmentTime0),
     highlight_tokens(Result.data, TB, 0, 0, 0, 0, Count),
     get_time(FragmentTime1),
@@ -320,6 +323,11 @@ style(qualifier,       [colour(blue)]).
 style(definition,      [colour(blue)]).
 style(operator,        [colour(blue)]).
 
+style(lsp_diag_error,       [underline(red)]).
+style(lsp_diag_warning,     [underline(orange)]).
+style(lsp_diag_information, [underline(grey50)]).
+style(lsp_diag_hint,        [underline(darkgreen)]).
+
 
                 /*******************************
                 *      SERVER CONNECTION       *
@@ -366,6 +374,8 @@ lsp_event(opened(Buffer)) :-
     send(Buffer, attribute, lsp_version, 1),
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
+    lsp_connection(LSP),
+    asserta(lsp_buffer(URI, Buffer, LSP)),
     lsp_notify('textDocument/didOpen'(
                    #{textDocument:
                        #{ uri: URI,
@@ -375,9 +385,15 @@ lsp_event(opened(Buffer)) :-
                         }
                     })).
 lsp_event(closed(Buffer)) :-
-    get(Buffer, file, File),
-    File \== @nil,
-    pp(closed(File)).
+    get(Buffer, attribute, lsp_tracking, URI),
+    debug(lsp(file), 'Closed ~p', [URI]),
+    lsp_connection(LSP),
+    retractall(lsp_buffer(URI, Buffer, LSP)),
+    lsp_notify('textDocument/didClose'(
+                   #{textDocument:
+                       #{ uri: URI
+                        }
+                    })).
 lsp_event(changed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     get(Buffer, lsp_changes, Changes),
@@ -425,18 +441,86 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
             }
          }).
 
+%!  'textDocument/publishDiagnostics'(+Data)
+%
+%   Sent after we  send  a  didOpen   or  didChange  notification.  This
+%   contains (warning) messages.
+
 'textDocument/publishDiagnostics'(Data) :-
     (   debugging(lsp(diagnostics))
     ->  pp(Data)
     ;   true
-    ).
+    ),
+    #{ uri:URIs, diagnostics: Diagnostics } :< Data,
+    atom_string(URI, URIs),
+    lsp_buffer(URI, Buffer, _LSP),
+    !,
+    send(Buffer, for_all_fragments,
+         if(message(@arg1, instance_of, emacs_lsp_diagnostic),
+            message(@arg1, free))),
+    State = counts(0,0,0,0),
+    maplist(show_diagnostic(Buffer, State), Diagnostics),
+    report_diagnostic_counts(State, Buffer),
+    debug(lsp(diagnostics), 'Counts: ~p', [State]).
+'textDocument/publishDiagnostics'(_).
+
+report_diagnostic_counts(counts(E,W,I,H), Buffer) :-
+    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H).
+
+show_diagnostic(Buffer, State, Diagnostic) :-
+    #{message:Msg, range: Range, severity: Severity} :< Diagnostic,
+    #{start: Start, end: End} :< Range,
+    lsp_offset(Start, Buffer, StartOffset),
+    lsp_offset(End, Buffer, EndOffset),
+    Length is EndOffset-StartOffset,
+    lsp_severity_type(Severity, Style),
+    step_count(Severity, State),
+    new(_, emacs_lsp_diagnostic(Buffer, StartOffset, Length, Msg, Style)).
+
+lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
+    get(Buffer, lsp_offset, Line, Char, Offset).
+
+step_count(Severity, State) :-
+    arg(Severity, State, C0),
+    C is C0+1,
+    nb_setarg(Severity, State, C).
+
+lsp_severity_type(1, lsp_diag_error).
+lsp_severity_type(2, lsp_diag_warning).
+lsp_severity_type(3, lsp_diag_information).
+lsp_severity_type(4, lsp_diag_hint).
 
 
                 /*******************************
                 *           FRAGMENT           *
                 *******************************/
 
-:- pce_begin_class(emacs_c_fragment, emacs_colour_fragment).
+:- pce_begin_class(emacs_lsp_diagnostic, fragment,
+                   "Represent an LSP diagnostic message").
+
+variable(message, string, get, "LSP message").
+
+initialise(F, Buffer:text_buffer, Start:int, Len:int, Msg:string, Style:name) :->
+    "Create an LSP diagnostic fragment"::
+    send_super(F, initialise, Buffer, Start, Len, Style),
+    send(F, slot, message, Msg).
+
+identify(F) :->
+    "Show LSP message"::
+    get(F, style, Style),
+    style_pce_severity(Style, Severity, Label),
+    send(F?text_buffer, report, Severity, '%s: %s', Label, F?message).
+
+:- det(style_pce_severity/3).
+style_pce_severity(lsp_diag_error,       error,   'Error').
+style_pce_severity(lsp_diag_warning,     warning, 'Warning').
+style_pce_severity(lsp_diag_information, status,  'Information').
+style_pce_severity(lsp_diag_hint,        status,  'Hint').
+
+:- pce_end_class.
+
+:- pce_begin_class(emacs_c_fragment, emacs_colour_fragment,
+                   "Represent an LSP highlight fragment").
 
 variable(modifiers,	int := 0, get, "LSP token type modifiers").
 
