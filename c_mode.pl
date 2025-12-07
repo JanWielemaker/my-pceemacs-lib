@@ -323,10 +323,15 @@ style(qualifier,       [colour(blue)]).
 style(definition,      [colour(blue)]).
 style(operator,        [colour(blue)]).
 
-style(lsp_diag_error,       [underline(red)]).
-style(lsp_diag_warning,     [underline(orange)]).
-style(lsp_diag_information, [underline(grey50)]).
-style(lsp_diag_hint,        [underline(darkgreen)]).
+style(lsp_diag_error,   [icon(Icon), underline(red)])      :- lsp_icon(error, Icon).
+style(lsp_diag_warning, [icon(Icon), underline(orange)])   :- lsp_icon(warning, Icon).
+style(lsp_diag_info,    [icon(Icon), underline(yellow)])   :- lsp_icon(info, Icon).
+style(lsp_diag_hint,    [icon(Icon), underline(navyblue)]) :- lsp_icon(hint, Icon).
+
+lsp_icon(error,   '64x64/lsp-error.png').
+lsp_icon(warning, '64x64/lsp-warning.png').
+lsp_icon(info,    '64x64/lsp-information.png').
+lsp_icon(hint,    '64x64/lsp-hint.png').
 
 
                 /*******************************
@@ -416,7 +421,6 @@ lsp_event(changed(Buffer)) :-
                contentChanges: JSONChanges
              })).
 
-
 to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
                              end: #{line: EL, character: EP}
                            },
@@ -464,8 +468,14 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
     debug(lsp(diagnostics), 'Counts: ~p', [State]).
 'textDocument/publishDiagnostics'(_).
 
-report_diagnostic_counts(counts(E,W,I,H), Buffer) :-
-    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H).
+report_diagnostic_counts(Counts, Buffer) :-
+    Counts = counts(E,W,I,H),
+    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H),
+    (   Counts == counts(0,0,0,0)
+    ->  true
+    ;   send(Buffer?editors, for_all,
+             message(@arg1, margin_width, 22))
+    ).
 
 show_diagnostic(Buffer, State, Diagnostic) :-
     #{message:Msg, range: Range, severity: Severity} :< Diagnostic,
@@ -473,7 +483,7 @@ show_diagnostic(Buffer, State, Diagnostic) :-
     lsp_offset(Start, Buffer, StartOffset),
     lsp_offset(End, Buffer, EndOffset),
     Length is EndOffset-StartOffset,
-    lsp_severity_type(Severity, Style),
+    lsp_severity_type(Severity, _Name, Style),
     step_count(Severity, State),
     new(_, emacs_lsp_diagnostic(Buffer, StartOffset, Length, Msg, Style)).
 
@@ -485,10 +495,10 @@ step_count(Severity, State) :-
     C is C0+1,
     nb_setarg(Severity, State, C).
 
-lsp_severity_type(1, lsp_diag_error).
-lsp_severity_type(2, lsp_diag_warning).
-lsp_severity_type(3, lsp_diag_information).
-lsp_severity_type(4, lsp_diag_hint).
+lsp_severity_type(1, error,   lsp_diag_error).
+lsp_severity_type(2, warning, lsp_diag_warning).
+lsp_severity_type(3, info,    lsp_diag_info).
+lsp_severity_type(4, hint,    lsp_diag_hint).
 
 
                 /*******************************
@@ -512,10 +522,10 @@ identify(F) :->
     send(F?text_buffer, report, Severity, '%s: %s', Label, F?message).
 
 :- det(style_pce_severity/3).
-style_pce_severity(lsp_diag_error,       error,   'Error').
-style_pce_severity(lsp_diag_warning,     warning, 'Warning').
-style_pce_severity(lsp_diag_information, status,  'Information').
-style_pce_severity(lsp_diag_hint,        status,  'Hint').
+style_pce_severity(lsp_diag_error,   error,   'Error').
+style_pce_severity(lsp_diag_warning, warning, 'Warning').
+style_pce_severity(lsp_diag_info,    status,  'Information').
+style_pce_severity(lsp_diag_hint,    status,  'Hint').
 
 :- pce_end_class.
 
@@ -676,4 +686,35 @@ save_word_location(M) :->
     new(Title, string('%s (use)', Identifier)),
     send(M, location_history, SW, WLen, always := @on, title := Title).
 
+selected_fragment(M, Fragment:fragment) :->
+    "User selected a fragment in the margin"::
+    (   send(Fragment, instance_of, emacs_lsp_diagnostic)
+    ->  get(M, editor, E),
+        get(Fragment, start, Start),
+        get(Fragment, style, Style),
+        lsp_severity_type(_Level, Name, Style),
+        send(emacs_lsp_feedback(E, Start, Name, Fragment?message), open)
+    ;   true
+    ).
+
 :- emacs_end_mode.
+
+:- pce_begin_class(emacs_lsp_feedback, dialog,
+                   "Provide feedback on LSP errors").
+
+initialise(W, Editor:editor, Offset:int,
+           Level:{error,warning,info,hint}, Msg:string) :->
+    get(Editor?image, character_position, Offset, point(X,Y)),
+    get(Editor, frame_position, point(OX,OY)),
+    get(Editor, frame, Master),
+    send_super(W, initialise, "LSP Feedback"),
+    send(W, transient_for, Master),
+    send(W, kind, popup),
+    lsp_icon(Level, Icon),
+    send(W, append, new(I, label(icon, image(Icon)))),
+    send(W, append, new(M, label(message, Msg)), right),
+    send_list([I,M], reference, point(0,0)),
+    send(W, append, button(done, message(W, destroy))),
+    send(W, open, point(OX+X+20, OY+Y+2)).
+
+:- pce_end_class.
