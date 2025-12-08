@@ -478,14 +478,14 @@ report_diagnostic_counts(Counts, Buffer) :-
     ).
 
 show_diagnostic(Buffer, State, Diagnostic) :-
-    #{message:Msg, range: Range, severity: Severity} :< Diagnostic,
+    #{range: Range, severity: Severity} :< Diagnostic,
     #{start: Start, end: End} :< Range,
     lsp_offset(Start, Buffer, StartOffset),
     lsp_offset(End, Buffer, EndOffset),
     Length is EndOffset-StartOffset,
     lsp_severity_type(Severity, _Name, Style),
     step_count(Severity, State),
-    new(_, emacs_lsp_diagnostic(Buffer, StartOffset, Length, Msg, Style)).
+    new(_, emacs_lsp_diagnostic(Buffer, StartOffset, Length, Diagnostic, Style)).
 
 lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
     get(Buffer, lsp_offset, Line, Char, Offset).
@@ -508,12 +508,18 @@ lsp_severity_type(4, hint,    lsp_diag_hint).
 :- pce_begin_class(emacs_lsp_diagnostic, fragment,
                    "Represent an LSP diagnostic message").
 
-variable(message, string, get, "LSP message").
+variable(json,    prolog, get, "JSON diagnostic message").
 
-initialise(F, Buffer:text_buffer, Start:int, Len:int, Msg:string, Style:name) :->
+initialise(F, Buffer:text_buffer, Start:int, Len:int,
+           JSON:prolog, Style:name) :->
     "Create an LSP diagnostic fragment"::
     send_super(F, initialise, Buffer, Start, Len, Style),
-    send(F, slot, message, Msg).
+    send(F, slot, json, JSON).
+
+message(F, Msg:string) :<-
+    "Diagnostic message"::
+    get(F, json, Dict),
+    Msg = Dict.get(message, "No message").
 
 identify(F) :->
     "Show LSP message"::
