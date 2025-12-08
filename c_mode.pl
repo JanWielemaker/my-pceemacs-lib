@@ -527,6 +527,16 @@ identify(F) :->
     style_pce_severity(Style, Severity, Label),
     send(F?text_buffer, report, Severity, '%s: %s', Label, F?message).
 
+lsp_class(F, LspClass:{error,warning,info,hint}) :<-
+    "Get severity class"::
+    get(F, style, Style),
+    style_pce_severity(Style, LspClass, _Label).
+
+icon(F, Icon:image) :<-
+    get(F, style, Style),
+    lsp_severity_type(_Level, LspClass, Style),
+    lsp_icon(LspClass, Icon).
+
 :- det(style_pce_severity/3).
 style_pce_severity(lsp_diag_error,   error,   'Error').
 style_pce_severity(lsp_diag_warning, warning, 'Warning').
@@ -709,11 +719,8 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
     "Show message associated with a fragment below the fragment"::
     (   send(Fragment, instance_of, emacs_lsp_diagnostic)
     ->  get(M, editor, E),
-        get(Fragment, start, Start),
-        get(Fragment, style, Style),
-        lsp_severity_type(_Level, Name, Style),
         ignore(send(M, send_hyper, note, destroy)),
-        new(W, emacs_lsp_feedback(E, Start, Name, Fragment?message, Hover)),
+        new(W, emacs_lsp_feedback(E, Fragment, Hover)),
         new(_, partof_hyper(M, W, note, mode)),
         send(W, open)
     ;   true
@@ -729,9 +736,9 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
 
 class_variable(text_width, int, 400).
 
-initialise(W, Editor:editor, Offset:int,
-           Level:{error,warning,info,hint}, Msg:string,
+initialise(W, Editor:editor, Fragment:emacs_lsp_diagnostic,
            Hover:[bool]) :->
+    get(Fragment, start, Offset),
     get(Editor, image, TextImage),
     get(TextImage, character_position, Offset, point(X,Y)),
     get(TextImage, frame_position, point(OX,OY)),
@@ -739,7 +746,7 @@ initialise(W, Editor:editor, Offset:int,
     send_super(W, initialise, "LSP Feedback"),
     send(W, transient_for, Master),
     send(W, kind, popup),
-    lsp_icon(Level, Icon),
+    get(Fragment, icon, Icon),
     send(W, append, new(I, label(icon, image(Icon)))),
     get(W, class_variable_value, text_width, TW),
     send(W, append, new(G, dialog_group(message,group)), right),
@@ -750,7 +757,7 @@ initialise(W, Editor:editor, Offset:int,
     ->  true
     ;   send(W, append, button(done, message(W, destroy)))
     ),
-    send(W, message, Msg),
+    send(W, message, Fragment?message),
     send(W?frame, position, point(OX+X, OY+Y+2)).
 
 explicitly_opened(W) :->
