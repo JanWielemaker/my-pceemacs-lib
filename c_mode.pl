@@ -688,33 +688,91 @@ save_word_location(M) :->
 
 selected_fragment(M, Fragment:fragment) :->
     "User selected a fragment in the margin"::
+    send(M, show_fragment_note, Fragment).
+
+hover_fragment_icon(M, Fragment:fragment*, _Area:[area]) :->
+    "User selected a fragment in the margin"::
+    (   Fragment == @nil
+    ->  ignore(send(M, send_hyper, note, hover_end))
+    ;   send(M, send_hyper, note, explicitly_opened)
+    ->  true
+    ;   send(M, show_fragment_note, Fragment, @on)
+    ).
+
+show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
+    "Show message associated with a fragment below the fragment"::
     (   send(Fragment, instance_of, emacs_lsp_diagnostic)
     ->  get(M, editor, E),
         get(Fragment, start, Start),
         get(Fragment, style, Style),
         lsp_severity_type(_Level, Name, Style),
-        send(emacs_lsp_feedback(E, Start, Name, Fragment?message), open)
+        ignore(send(M, send_hyper, note, destroy)),
+        new(W, emacs_lsp_feedback(E, Start, Name, Fragment?message, Hover)),
+        new(_, partof_hyper(M, W, note, mode)),
+        send(W, open)
     ;   true
     ).
 
 :- emacs_end_mode.
 
+:- use_module(library(doc/objects)). % @br, etc.
+:- use_module(library(hyper)). % @br, etc.
+
 :- pce_begin_class(emacs_lsp_feedback, dialog,
                    "Provide feedback on LSP errors").
 
+class_variable(text_width, int, 400).
+
 initialise(W, Editor:editor, Offset:int,
-           Level:{error,warning,info,hint}, Msg:string) :->
-    get(Editor?image, character_position, Offset, point(X,Y)),
-    get(Editor, frame_position, point(OX,OY)),
+           Level:{error,warning,info,hint}, Msg:string,
+           Hover:[bool]) :->
+    get(Editor, image, TextImage),
+    get(TextImage, character_position, Offset, point(X,Y)),
+    get(TextImage, frame_position, point(OX,OY)),
     get(Editor, frame, Master),
     send_super(W, initialise, "LSP Feedback"),
     send(W, transient_for, Master),
     send(W, kind, popup),
     lsp_icon(Level, Icon),
     send(W, append, new(I, label(icon, image(Icon)))),
-    send(W, append, new(M, label(message, Msg)), right),
-    send_list([I,M], reference, point(0,0)),
-    send(W, append, button(done, message(W, destroy))),
-    send(W, open, point(OX+X+20, OY+Y+2)).
+    get(W, class_variable_value, text_width, TW),
+    send(W, append, new(G, dialog_group(message,group)), right),
+    send(G, append, new(M, parbox(TW, left))),
+    send(M, name, message),
+    send_list([I,G], reference, point(0,0)),
+    (   Hover == @on
+    ->  true
+    ;   send(W, append, button(done, message(W, destroy)))
+    ),
+    send(W, message, Msg),
+    send(W?frame, position, point(OX+X, OY+Y+2)).
+
+explicitly_opened(W) :->
+    "User opened this using a click"::
+    get(W, member, done, _Button).
+
+hover_end(W) :->
+    "Mouse left the icon"::
+    (   send(W, explicitly_opened)
+    ->  true
+    ;   send(W, destroy)
+    ).
+
+message(W, Msg:string) :->
+    "Update the message"::
+    get(W, member, message, Group),
+    get(Group, member, message, PB),
+    object(Msg, string(Message)),
+    split_string(Message, '\n', '', Lines),
+    append_pars(Lines, PB).
+
+append_pars([], _) =>
+    true.
+append_pars([Last], PB) =>
+    send(PB, cdata, Last).
+append_pars([H|T], PB) =>
+    send(PB, cdata, H),
+    send_list(PB, append, [@nbsp,@br]),
+    append_pars(T, PB).
 
 :- pce_end_class.
