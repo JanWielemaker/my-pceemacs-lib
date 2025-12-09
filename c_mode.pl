@@ -62,7 +62,8 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(file)).
 %:- debug(lsp(highlight)).
 %:- debug(lsp(project)).
-%:- debug(lsp(process(log))).
+%:- debug(lsp(process(verbose))).
+%:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
 :- dynamic
@@ -356,10 +357,17 @@ lsp_notify(Message) :-
                 [ header(true)
                 ]).
 
+%!  lsp_call(++Message, -Result) is det.
+%!  lsp_call(++Message, -Result, +Options) is det.
+
 lsp_call(Message, Result) :-
+    lsp_call(Message, Result, []).
+
+lsp_call(Message, Result, Options) :-
     lsp_connection(Stream),
     json_call(Stream, Message, Result,
               [ header(true)
+              | Options
               ]).
 
 
@@ -408,7 +416,7 @@ lsp_event(changed(Buffer)) :-
     (   Changes == @nil
     ->  get(Buffer, contents, string(Content)),
         JSONChanges = [ #{text: Content} ],
-        send(Buffer, lsp_changes, @on)                % re-enable incremental
+        send(Buffer, lsp_changes, @on)      % re-enable incremental
     ;   chain_list(Changes, ChangeList),
         maplist(to_json, ChangeList, JSONChanges)
     ),
@@ -443,7 +451,12 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
         #{ parameters:
            #{ diagnostics: true
             }
-         }).
+         }),
+    'workspace/applyEdit'(
+        #{ parameters:
+           #{ edit: true
+            }
+         }) : true.
 
 %!  'textDocument/publishDiagnostics'(+Data)
 %
@@ -500,6 +513,89 @@ lsp_severity_type(2, warning, lsp_diag_warning).
 lsp_severity_type(3, info,    lsp_diag_info).
 lsp_severity_type(4, hint,    lsp_diag_hint).
 
+%!  lsp_execute_command(+Command) is det.
+%
+%   Send a request to execute Command. While  this is a JSON RPC request
+%   and must have an `id`, it is  normally not answered. The async(true)
+%   option ensures we are not waiting for a response.
+
+lsp_execute_command(Command) :-
+    lsp_call('workspace/executeCommand'(
+                 #{ command: Command.command,
+                    arguments: Command.arguments
+                  }),
+             _NoReply,
+             [async(true)]).
+
+%!  'workspace/applyEdit'(+Data, -Result) is det.
+%
+%   Act on server initiated workspace edits.
+
+'workspace/applyEdit'(Data, Result) :-
+    (   debugging(lsp(edit))
+    ->  pp(Data)
+    ;   true
+    ),
+    (   catch(apply_edits(Data), Error, true)
+    ->  (   var(Error)
+        ->  Result = #{applied: true}
+        ;   message_to_string(Error, Msg),
+            Result = #{ applied: false,
+                        failureReason: Msg
+                      }
+        )
+    ;   Result = #{ applied: false,
+                    failureReason: "Failed"
+                  }
+    ).
+
+apply_edits(Data) :-
+    dict_pairs(Data.edit.changes, _, Pairs),
+    maplist(apply_edit, Pairs).
+
+apply_edit(FileURI-Changes) :-
+    lsp_buffer(FileURI, Buffer, _LSP),
+    apply_buffer_changes(Buffer, Changes).
+apply_edit(FileURI-Changes) :-
+    uri_file_name(FileURI, File),
+    new(Buffer, emacs_buffer(File)),
+    apply_buffer_changes(Buffer, Changes).
+
+apply_buffer_changes(Buffer, Changes) :-
+    in_pce_thread_sync(apply_buffer_changes_(Buffer, Changes)).
+
+apply_buffer_changes_(Buffer, Changes) :-
+    maplist(apply_change(Buffer), Changes),
+    send(Buffer, mark_undo),
+    broadcast(pce_emacs(changed(Buffer))),
+    delay(0.1, lsp_highlight(Buffer)).
+
+apply_change(Buffer, Change) :-
+    #{ newText: String, range: Range } :< Change,
+    #{ start:Start, end:End } :< Range,
+    lsp_replace(Buffer, Start, End, String).
+
+lsp_replace(Buffer, Start, End, String) :-
+    lsp_offset(Start, Buffer, StartOffset),
+    lsp_offset(End, Buffer, EndOffset),
+    Length is EndOffset-StartOffset,
+    replace(Buffer, StartOffset, Length, String).
+
+replace(Buffer, StartOffset, Length, String) :-
+    debug(lsp(edit), '~p: ~p[~p] = ~p',
+          [Buffer, StartOffset, Length, String]),
+    send(Buffer, delete, StartOffset, Length),
+    send(Buffer, insert, StartOffset, String).
+
+:- meta_predicate
+    delay(+, 0).
+
+delay(Time, Goal) :-
+    new(T, timer(Time,
+                 and(message(@prolog, call, prolog(Goal)),
+                     message(@receiver, free)))),
+    send(T, start, once).
+
 
                 /*******************************
                 *           FRAGMENT           *
@@ -536,6 +632,19 @@ icon(F, Icon:image) :<-
     get(F, style, Style),
     lsp_severity_type(_Level, LspClass, Style),
     lsp_icon(LspClass, Icon).
+
+fixes(F, Fixes:prolog) :<-
+    "Get fixes from LSP server"::
+    get(F, text_buffer, Buffer),
+    get(Buffer, attribute, lsp_tracking, URI),
+    get(F, json, Diagnostic),
+    lsp_call('textDocument/codeAction'(
+                 #{ textDocument: #{ uri: URI},
+                    range: Diagnostic.range,
+                    context: #{ diagnostics: [Diagnostic] }
+                  }),
+             Fixes).
+
 
 :- det(style_pce_severity/3).
 style_pce_severity(lsp_diag_error,   error,   'Error').
@@ -729,7 +838,7 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
 :- emacs_end_mode.
 
 :- use_module(library(doc/objects)). % @br, etc.
-:- use_module(library(hyper)). % @br, etc.
+:- use_module(library(hyper)).
 
 :- pce_begin_class(emacs_lsp_feedback, dialog,
                    "Provide feedback on LSP errors").
@@ -755,10 +864,21 @@ initialise(W, Editor:editor, Fragment:emacs_lsp_diagnostic,
     send_list([I,G], reference, point(0,0)),
     (   Hover == @on
     ->  true
-    ;   send(W, append, button(done, message(W, destroy)))
+    ;   send(W, fixes_buttons, Fragment),
+        send(W, append, new(Done, button(done, message(W, destroy)))),
+        send(W, keyboard_focus, Done)
     ),
     send(W, message, Fragment?message),
+    new(_, partof_hyper(Fragment, W, dialog, fragment)),
     send(W?frame, position, point(OX+X, OY+Y+2)).
+
+destroy(W) :->
+    "Allow calling from a thread"::
+    (   thread_self(Me),
+        pce_thread(Me)
+    ->  send_super(W, destroy)
+    ;   in_pce_thread(send(W, destroy))
+    ).
 
 explicitly_opened(W) :->
     "User opened this using a click"::
@@ -787,5 +907,33 @@ append_pars([H|T], PB) =>
     send(PB, cdata, H),
     send_list(PB, append, [@nbsp,@br]),
     append_pars(T, PB).
+
+fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
+    "Add buttons for available fixes"::
+    get(Fragment, fixes, Fixes),
+    (   member(Fix, Fixes),
+        append_fix_button(W, Fix),
+        fail
+    ;   true
+    ).
+
+append_fix_button(W, Fix) :-
+    #{ arguments: _Args, title: Title } :< Fix,
+    get(W, member, message, Group),
+    send(Group, append,
+         new(B, button(Title, message(W, apply_change, Title))),
+         next_row),
+    send(B, alignment, left).
+
+apply_change(W, TitleObj:string) :->
+    "Apply a selected change"::
+    get(W, get_hyper, fragment, fixes, Fixes),
+    object(TitleObj, string(TitleAtom)),
+    atom_string(TitleAtom, Title),
+    (   member(Fix, Fixes),
+        #{title:Title} :< Fix
+    ->  true
+    ),
+    lsp_execute_command(Fix).
 
 :- pce_end_class.
