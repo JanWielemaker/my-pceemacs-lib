@@ -63,7 +63,8 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(highlight)).
 %:- debug(lsp(project)).
 %:- debug(lsp(process(verbose))).
-%:- debug(lsp(edit)).
+:- debug(lsp(changes)).
+:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
 :- dynamic
@@ -210,7 +211,8 @@ compile_commands_dir(Dir, CompileCommandsDir) :-
     expand_file_name(Pattern, BuildDirs),
     member(BuildDir, BuildDirs),
     exists_directory(BuildDir),
-    directory_file_path(BuildDir, 'compile_commands.json', CompileCommandsFile),
+    directory_file_path(BuildDir, 'compile_commands.json',
+                        CompileCommandsFile),
     exists_file(CompileCommandsFile),
     !,
     CompileCommandsDir = BuildDir.
@@ -416,9 +418,14 @@ lsp_event(changed(Buffer)) :-
     (   Changes == @nil
     ->  get(Buffer, contents, string(Content)),
         JSONChanges = [ #{text: Content} ],
+        debug(lsp(changes), 'Sending whole buffer for ~p', [Buffer]),
         send(Buffer, lsp_changes, @on)      % re-enable incremental
     ;   chain_list(Changes, ChangeList),
-        maplist(to_json, ChangeList, JSONChanges)
+        maplist(to_json, ChangeList, JSONChanges),
+        debug(lsp(changes), '~p: changes: ~@',
+              [ Buffer,
+                print_term(ChangeList, [output(current_output)])
+              ])
     ),
     lsp_notify(
         'textDocument/didChange'(
