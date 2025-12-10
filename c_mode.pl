@@ -63,8 +63,8 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(highlight)).
 %:- debug(lsp(project)).
 %:- debug(lsp(process(verbose))).
-:- debug(lsp(changes)).
-:- debug(lsp(edit)).
+%:- debug(lsp(changes)).
+%:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
 :- dynamic
@@ -424,7 +424,7 @@ lsp_event(changed(Buffer)) :-
         maplist(to_json, ChangeList, JSONChanges),
         debug(lsp(changes), '~p: changes: ~@',
               [ Buffer,
-                print_term(ChangeList, [output(current_output)])
+                print_term(JSONChanges, [output(current_output)])
               ])
     ),
     lsp_notify(
@@ -568,31 +568,37 @@ apply_edit(FileURI-Changes) :-
     new(Buffer, emacs_buffer(File)),
     apply_buffer_changes(Buffer, Changes).
 
+%!  apply_buffer_changes(+Buffer, +Changes) is det.
+%
+%   Apply a set of edits. Each edit  has a `range` and `newText`. Ranges
+%   are against the original document. We turn   the request into a dict
+%   in PceEmacs coordinates, sort them and apply them backwards from the
+%   end.
+
 apply_buffer_changes(Buffer, Changes) :-
     in_pce_thread_sync(apply_buffer_changes_(Buffer, Changes)).
 
 apply_buffer_changes_(Buffer, Changes) :-
-    maplist(apply_change(Buffer), Changes),
+    maplist(change_description(Buffer), Changes, Descriptions),
+    sort(offset, >=, Descriptions, Ordered),
+    maplist(apply_change(Buffer), Ordered),
     send(Buffer, mark_undo),
     broadcast(pce_emacs(changed(Buffer))),
     delay(0.1, lsp_highlight(Buffer)).
 
-apply_change(Buffer, Change) :-
+change_description(Buffer, Change,
+                   #{offset: StartOffset, length: Length, text:String}) :-
     #{ newText: String, range: Range } :< Change,
     #{ start:Start, end:End } :< Range,
-    lsp_replace(Buffer, Start, End, String).
-
-lsp_replace(Buffer, Start, End, String) :-
     lsp_offset(Start, Buffer, StartOffset),
     lsp_offset(End, Buffer, EndOffset),
-    Length is EndOffset-StartOffset,
-    replace(Buffer, StartOffset, Length, String).
+    Length is EndOffset-StartOffset.
 
-replace(Buffer, StartOffset, Length, String) :-
+apply_change(Buffer, #{offset: Start, length: Length, text:String}) :-
     debug(lsp(edit), '~p: ~p[~p] = ~p',
-          [Buffer, StartOffset, Length, String]),
-    send(Buffer, delete, StartOffset, Length),
-    send(Buffer, insert, StartOffset, String).
+          [Buffer, Start, Length, String]),
+    send(Buffer, delete, Start, Length),
+    send(Buffer, insert, Start, String).
 
 :- meta_predicate
     delay(+, 0).
@@ -926,11 +932,21 @@ fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
 
 append_fix_button(W, Fix) :-
     #{ arguments: _Args, title: Title } :< Fix,
+    fix_icon(Fix.command, Icon),
     get(W, member, message, Group),
     send(Group, append,
-         new(B, button(Title, message(W, apply_change, Title))),
+         new(LBL, label(icon, image(Icon))),
          next_row),
+    send(Group, append,
+         new(B, button(Title, message(W, apply_change, Title))),
+         right),
+    send(LBL, width, 32),
+    send(LBL, reference, point(0, B?reference?y)),
     send(B, alignment, left).
+
+fix_icon("clangd.applyTweak", '64x64/lsp-apply-tweak.png') :- !.
+fix_icon("clangd.applyFix",   '64x64/lsp-apply-fix.png')   :- !.
+fix_icon(_,                   '64x64/lsp-apply-fix.png').
 
 apply_change(W, TitleObj:string) :->
     "Apply a selected change"::
@@ -941,6 +957,7 @@ apply_change(W, TitleObj:string) :->
         #{title:Title} :< Fix
     ->  true
     ),
+    send(W, destroy),
     lsp_execute_command(Fix).
 
 :- pce_end_class.
