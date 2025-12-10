@@ -824,6 +824,38 @@ save_word_location(M) :->
     new(Title, string('%s (use)', Identifier)),
     send(M, location_history, SW, WLen, always := @on, title := Title).
 
+%   <-dabbrev_candidates
+%
+%   Get candidates for dynamic  abbreviations.   The  `user0`  target is
+%   tried first. After that we  try   backward  search  and then forward
+%   search in the buffer and than `user1`, `user2` and `user3`.
+
+dabbrev_candidates(M, user0:name, Target:name, Completions:chain) :<-
+    "Get additional candidates from the LSP server"::
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, URI),
+    get(M, caret, Caret),
+    get(TB, line_number, Caret, Line0),
+    Line is Line0-1,
+    get(TB, lsp_column, Caret, Char),
+    lsp_call('textDocument/completion'(
+                 #{ textDocument: #{ uri: URI },
+                    position: #{line: Line, character: Char},
+                    context: #{triggerKind: 1}
+                  }),
+             Reply),
+    convlist(completion(Target), Reply.get(items, []), List),
+    chain_list(Completions, List).
+
+completion(Target, Dict, Completion) :-
+    Completion = Dict.get(insertText),
+    sub_string(Completion, 0, _, _, Target).
+
+
+                /*******************************
+                *            NOTES             *
+                *******************************/
+
 selected_fragment(M, Fragment:fragment) :->
     "User selected a fragment in the margin"::
     send(M, show_fragment_note, Fragment).
