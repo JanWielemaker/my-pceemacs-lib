@@ -48,6 +48,7 @@
 :- use_module(library(error)).
 :- use_module(library(filesex)).
 :- use_module(library(option)).
+:- use_module(lsp_symbol_item).
 
 /** <module> A PceEmacs C mode based on the `clangd` LSP
 
@@ -767,8 +768,29 @@ adjust_style(keyword, M, TB, From, Len, Style) =>
 adjust_style(Style0, _M, _TB, _From, _Len, Style) =>
     Style = Style0.
 
+lsp_server(_M, Server:prolog) :<-
+    "Get the LSP server for this mode"::
+    lsp_connection(Server).
+
+on_symbol(M) :->
+    "True if caret is on a symbol"::
+    get(M, caret, Caret),
+    (   Pos = Caret
+    ;   Pos is Caret - 1
+    ),
+    get(M, character, Pos, Char),
+    char_type(Char, alnum),
+    !.
+
 find_definition(M) :->
     "LSP based find definition"::
+    (   send(M, on_symbol)
+    ->  send(M, find_symbol_at_caret)
+    ;   send(M, noarg_call, find_symbol)
+    ).
+
+find_symbol_at_caret(M) :->
+    "Find definition from current location"::
     get(M, text_buffer, TB),
     get(TB, attribute, lsp_tracking, URI),
     get(M, caret, Caret),
@@ -786,6 +808,21 @@ find_definition(M) :->
                   }),
              Result),
     send(M, lsp_edit, Result).
+
+find_symbol(M, Tag:lsp_tag) :->
+    "Prompt for symbol"::
+    send(M, report, warning, 'Symbol: %s', Tag),
+    lsp_call('workspace/symbol'(
+                  #{ query: Tag
+                   }),
+              Symbols,
+              [ header(true)
+              ]),
+    (   member(Symbol, Symbols),
+        atom_string(Tag, Symbol.name)
+    ->  send(M, lsp_edit, Symbol.location)
+    ;   send(M, report, warning, 'Could not find LSP symbol %s', Tag)
+    ).
 
 lsp_edit(M, Location:prolog) :->
     "Edit a location returned by the LSP server"::
