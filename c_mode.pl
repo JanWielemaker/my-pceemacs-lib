@@ -786,7 +786,7 @@ find_definition(M) :->
     "LSP based find definition"::
     (   send(M, on_symbol)
     ->  send(M, find_symbol_at_caret)
-    ;   send(M, noarg_call, find_symbol)
+    ;   send(M, noarg_call, goto_symbol)
     ).
 
 find_symbol_at_caret(M) :->
@@ -809,9 +809,8 @@ find_symbol_at_caret(M) :->
              Result),
     send(M, lsp_edit, Result).
 
-find_symbol(M, Tag:lsp_tag) :->
-    "Prompt for symbol"::
-    send(M, report, warning, 'Symbol: %s', Tag),
+goto_symbol(M, Tag:symbol=lsp_tag) :->
+    "Go to the definition of an LSP symbol"::
     lsp_call('workspace/symbol'(
                   #{ query: Tag
                    }),

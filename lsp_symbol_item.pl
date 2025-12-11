@@ -81,12 +81,3 @@ symbol_name(Prefix, Symbol, Name) :-
     sub_atom(Name, 0, _, _, Prefix).
 
 :- pce_end_class.
-
-test :-
-    my_c_mode:lsp_connection(Server),
-    new(D, dialog),
-    send(D, append, new(SI, lsp_symbol_item(symbol, '',
-                                            message(@prolog, writeln, @arg1),
-                                            Server))),
-    pp(SI),
-    send(D, open).
