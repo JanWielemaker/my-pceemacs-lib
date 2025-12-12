@@ -713,7 +713,8 @@ format(Fmt, Args, Head, Tail) :-
                 *******************************/
 
 :- emacs_extend_mode(c,
-		     [ find_definition = key('\\e.')
+		     [ find_definition = key('\\e.'),
+                       find_references = key('\\e?')
 		     ]).
 
 class_variable(auto_colourise_size_limit, int, 400000).
@@ -772,6 +773,21 @@ lsp_server(_M, Server:prolog) :<-
     "Get the LSP server for this mode"::
     lsp_connection(Server).
 
+lsp_position(M, For:[int], Pos:prolog) :<-
+    "Get LSP compatible position"::
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, URI),
+    (   For == @default
+    ->  get(M, caret, Offset)
+    ;   Offset = For
+    ),
+    get(TB, line_number, Offset, Line1),
+    Line is Line1 - 1,
+    get(TB, lsp_column, Offset, Col),
+    Pos = #{ textDocument: #{ uri: URI },
+             position: #{line:Line, character:Col}
+           }.
+
 on_symbol(M) :->
     "True if caret is on a symbol"::
     get(M, caret, Caret),
@@ -791,22 +807,8 @@ find_definition(M) :->
 
 find_symbol_at_caret(M) :->
     "Find definition from current location"::
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_tracking, URI),
-    get(M, caret, Caret),
-    get(TB, line_number, Caret, Line1),
-    Line is Line1 - 1,
-    get(TB, lsp_column, Caret, Col),
-    lsp_call('textDocument/definition'(
-                 #{ textDocument:
-                      #{ uri: URI
-                       },
-                    position:
-                      #{ line: Line,
-                         character: Col
-                       }
-                  }),
-             Result),
+    get(M, lsp_position, Pos),
+    lsp_call('textDocument/definition'(Pos), Result),
     send(M, lsp_edit, Result).
 
 goto_symbol(M, Tag:symbol=lsp_tag) :->
@@ -859,6 +861,16 @@ save_word_location(M) :->
     get(TB, contents, SW, WLen, Identifier),
     new(Title, string('%s (use)', Identifier)),
     send(M, location_history, SW, WLen, always := @on, title := Title).
+
+find_references(M) :->
+    "Find references to symbol at caret"::
+    get(M, lsp_position, Pos),
+    lsp_call('textDocument/references'(
+                 Pos.put(#{context:
+                             #{ includeDeclaration: false }
+                          })),
+             Hits),
+    pp(Hits).
 
 %   <-dabbrev_candidates
 %
