@@ -44,8 +44,8 @@
     emacs_prompt:make_item_hook/6.
 
 emacs_prompt:make_item_hook(Mode, Label, Default, Type, History, Item) :-
-    get(Mode, lsp_server, Server),
     get(Type, name, lsp_tag),
+    get(Mode, lsp_server, Server),
     new(Item, lsp_symbol_item(Label, Default, @nil, Server)),
     (   History \== @default
     ->  send(Item, value_set, History)

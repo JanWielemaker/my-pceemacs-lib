@@ -867,10 +867,23 @@ find_references(M) :->
     get(M, lsp_position, Pos),
     lsp_call('textDocument/references'(
                  Pos.put(#{context:
-                             #{ includeDeclaration: false }
+                             #{ includeDeclaration: true }
                           })),
-             Hits),
-    pp(Hits).
+             References),
+    get(M, word, Word),
+    new(BM, emacs_bookmark_editor(string('References to %s', Word),
+                                  @off)),
+    length(References, Count),
+    forall(member(Ref, References),
+           add_lsp_reference(BM, Ref)),
+    send(BM, report, status,
+         'Found %d references to %s', Count, Word),
+    send(BM, open).
+
+add_lsp_reference(BM, Ref) :-
+    #{range: Range, uri:URI} :< Ref,
+    uri_file_name(URI, File),
+    send(BM, lsp_add(File, Range)).
 
 %   <-dabbrev_candidates
 %
