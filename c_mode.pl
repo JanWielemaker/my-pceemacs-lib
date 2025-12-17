@@ -84,7 +84,8 @@ lsp_start(Options) :-
     process_create(path(clangd),
                    Flags,
                    [ stdin(pipe(In)),
-                     stdout(pipe(Out))
+                     stdout(pipe(Out)),
+                     detached(true)
                    ]),
     stream_pair(Stream, Out, In),
     asserta(lsp_connection(Stream)),
