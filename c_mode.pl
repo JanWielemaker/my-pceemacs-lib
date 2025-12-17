@@ -715,7 +715,9 @@ format(Fmt, Args, Head, Tail) :-
 
 :- emacs_extend_mode(c,
 		     [ find_definition = key('\\e.'),
-                       find_references = key('\\e?')
+                       find_references = key('\\e?'),
+                       goto_next_error = key('\\egn'),
+                       goto_prev_error = key('\\egp')
 		     ]).
 
 class_variable(auto_colourise_size_limit, int, 400000).
@@ -941,6 +943,31 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
         send(W, open)
     ;   true
     ).
+
+goto_error(M, Dir:direction={next,prev}) :->
+    "Goto the next/prev LSP diagnostic"::
+    get(M, caret, Caret),
+    (   Dir == next
+    ->  Cond = (@arg1?start > Caret)
+    ;   Cond = (@arg1?end   < Caret)
+    ),
+    (   get(M, find_fragment,
+            and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                Cond),
+            Next)
+    ->  get(Next, start, Start),
+        get(Next, end, End),
+        send(M, selection, End, Start, highlight)
+    ;   send(M, report, status, "No further diagnostic messages")
+    ).
+
+goto_next_error(M) :->
+    "Go to the next LSP diagnostic"::
+    send(M, goto_error, next).
+
+goto_prev_error(M) :->
+    "Go to the previous LSP diagnostic"::
+    send(M, goto_error, prev).
 
 :- emacs_end_mode.
 
