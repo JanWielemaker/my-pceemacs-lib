@@ -947,14 +947,17 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
 goto_error(M, Dir:direction={next,prev}) :->
     "Goto the next/prev LSP diagnostic"::
     get(M, caret, Caret),
-    (   Dir == next
-    ->  Cond = (@arg1?start > Caret)
-    ;   Cond = (@arg1?end   < Caret)
-    ),
-    (   get(M, find_fragment,
-            and(message(@arg1, instance_of, emacs_lsp_diagnostic),
-                Cond),
-            Next)
+    (   (   Dir == next
+        ->  get(M, find_fragment,
+                and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                    @arg1?start > Caret),
+                Next)
+        ;   get(M, find_all_fragments,
+                and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                    @arg1?end   < Caret),
+                All),
+            get(All, tail, Next)
+        )
     ->  get(Next, start, Start),
         get(Next, end, End),
         send(M, selection, End, Start, highlight)
