@@ -70,6 +70,65 @@ library should manage multiple LSP servers for multiple modes.
     listen(pce_emacs(Event), lsp_event(Event)).
 
                 /*******************************
+                *     CLASS LSP WORKSPACE      *
+                *******************************/
+
+:- pce_begin_class(lsp_workspace, object,
+                   "Represent a workspace").
+
+variable(root,	directory, get, "Workspace root").
+
+initialise(WS, Root:root=directory) :->
+    "Create a workspace from its root"::
+    send_super(WS, initialise),
+    send(WS, slot, root, Root).
+
+%!  find_project_root(+File, +Mode, -Root, -Argv) is det.
+%
+%   Given File is being opened in the  editor, find the project root for
+%   Mode.
+
+find_project_root(_File, _Mode, Root, [Flag]) :-
+    exists_file('compile_commands.json'),
+    !,
+    absolute_file_name('.', CompileCommandsDir),
+    file_directory_name(CompileCommandsDir, Root),
+    compile_command_flag(CompileCommandsDir, Flag).
+find_project_root(File, _Mode, Root, [Flag]) :-
+    file_directory_name(File, Dir),
+    parent_directory(Dir, Parent),
+    compile_commands_dir(Parent, CompileCommandsDir),
+    !,
+    compile_command_flag(CompileCommandsDir, Flag),
+    Root = Parent.
+find_project_root(File, _Mode, Root, []) :-
+    file_directory_name(File, Root).
+
+parent_directory(Dir, Dir).
+parent_directory(Dir, Parent) :-
+    file_directory_name(Dir, Direct),
+    Direct \== Dir,
+    parent_directory(Direct, Parent).
+
+compile_commands_dir(Dir, CompileCommandsDir) :-
+    format(string(Pattern), '~w/build{,.*}', [Dir]),
+    expand_file_name(Pattern, BuildDirs),
+    member(BuildDir, BuildDirs),
+    exists_directory(BuildDir),
+    directory_file_path(BuildDir, 'compile_commands.json',
+                        CompileCommandsFile),
+    exists_file(CompileCommandsFile),
+    !,
+    CompileCommandsDir = BuildDir.
+
+compile_command_flag(Dir, Flag) :-
+    format(atom(Flag), '--compile-commands-dir=~w', [Dir]).
+
+:- pce_end_class.
+
+
+
+                /*******************************
                 *       CLASS LSP CLIENT       *
                 *******************************/
 
@@ -246,44 +305,6 @@ execute_command(LSP, Command:prolog) :->
 
 :- pce_end_class(lsp_client).
 
-%!  c_find_project(+File, -Root, -Argv) is det.
-
-c_find_project(_File, Root, [Flag]) :-
-    exists_file('compile_commands.json'),
-    !,
-    absolute_file_name('.', CompileCommandsDir),
-    file_directory_name(CompileCommandsDir, Root),
-    compile_command_flag(CompileCommandsDir, Flag).
-c_find_project(File, Root, [Flag]) :-
-    file_directory_name(File, Dir),
-    parent_directory(Dir, Parent),
-    compile_commands_dir(Parent, CompileCommandsDir),
-    !,
-    compile_command_flag(CompileCommandsDir, Flag),
-    Root = Parent.
-c_find_project(File, Root, []) :-
-    file_directory_name(File, Root).
-
-parent_directory(Dir, Dir).
-parent_directory(Dir, Parent) :-
-    file_directory_name(Dir, Direct),
-    Direct \== Dir,
-    parent_directory(Direct, Parent).
-
-compile_commands_dir(Dir, CompileCommandsDir) :-
-    format(string(Pattern), '~w/build{,.*}', [Dir]),
-    expand_file_name(Pattern, BuildDirs),
-    member(BuildDir, BuildDirs),
-    exists_directory(BuildDir),
-    directory_file_path(BuildDir, 'compile_commands.json',
-                        CompileCommandsFile),
-    exists_file(CompileCommandsFile),
-    !,
-    CompileCommandsDir = BuildDir.
-
-compile_command_flag(Dir, Flag) :-
-    format(atom(Flag), '--compile-commands-dir=~w', [Dir]).
-
 %!  lsp_highlight(+TextBuffer)
 %
 %   Do LSP based highlighting. Asks  for   the  tokens and applies them.
@@ -410,6 +431,8 @@ lsp_icon(hint,    '64x64/lsp-hint.png').
                 *      SERVER CONNECTION       *
                 *******************************/
 
+%!  ensure_lsp_server(+Buffer, +File, +Mode, -LSP)
+
 ensure_lsp_server(Buffer, _File, c, LSP) :-
     get(Buffer, attribute, lsp_client, LSP),
     !.
@@ -417,8 +440,8 @@ ensure_lsp_server(Buffer, _File, c, LSP) :-
     lsp_client(LSP),
     !,
     send(Buffer, attribute, lsp_client, LSP).
-ensure_lsp_server(Buffer, File, c, LSP) :-
-    c_find_project(File, Root, Flags),
+ensure_lsp_server(Buffer, File, Mode, LSP) :-
+    find_project_root(File, Mode, Root, Flags),
     (   debugging(lsp(process(Level)))	% error,info,verbose
     ->  true
     ;   Level = error
@@ -726,9 +749,13 @@ variable(modifiers,	int := 0,    get, "LSP token type modifiers").
 identify(F) :->
     "Identify LSP fragments"::
     get(F, style, StyleName),
-    get(F, modifiers, Mask),
-    get(F, lsp_client, LSP),
-    get(LSP, modifiers, Mask, Modifiers),
+    (   get(F, lsp_client, LSP),
+        LSP \== @nil,
+        get(F, modifiers, Mask),
+        Mask \== 0
+    ->  get(LSP, modifiers, Mask, Modifiers)
+    ;   Modifiers = []
+    ),
     term_string(Style, StyleName),
     phrase(c_fragment_message(Style, Modifiers), Codes),
     string_codes(String, Codes),
