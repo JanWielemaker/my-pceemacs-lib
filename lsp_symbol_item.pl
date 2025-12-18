@@ -34,7 +34,6 @@
           []).
 :- use_module(library(pce)).
 :- use_module(library(apply)).
-:- use_module(library(json_rpc_client)).
 :- use_module(library(pce_util)).
 
 :- initialization
@@ -45,8 +44,8 @@
 
 emacs_prompt:make_item_hook(Mode, Label, Default, Type, History, Item) :-
     get(Type, name, lsp_tag),
-    get(Mode, lsp_server, Server),
-    new(Item, lsp_symbol_item(Label, Default, @nil, Server)),
+    get(Mode, lsp_client, LSP),
+    new(Item, lsp_symbol_item(Label, Default, @nil, LSP)),
     (   History \== @default
     ->  send(Item, value_set, History)
     ;   true
@@ -55,24 +54,22 @@ emacs_prompt:make_item_hook(Mode, Label, Default, Type, History, Item) :-
 :- pce_begin_class(lsp_symbol_item, text_item,
                    "Find a symbol on the LSP server").
 
-variable(lsp_server, prolog, get, "Connected server").
+variable(lsp_server, lsp_client, get, "Connected LSP client").
 
 initialise(SI, Name:label=[name], Def:default=[char_array],
-           Msg:message=[code]*, Server:lsp_server=prolog) :->
+           Msg:message=[code]*, LSP:lsp_client=[lsp_client]) :->
     send_super(SI, initialise, Name, Def, Msg),
-    send(SI, slot, lsp_server, Server),
+    send(SI, slot, lsp_client, LSP),
     send(SI, style, combo_box).
 
 completions(SI, From:name, Matches:chain) :<-
     "Ask the LSP server for matches"::
-    get(SI, lsp_server, Server),
-    json_call(Server,
-              'workspace/symbol'(
-                  #{ query: From
-                   }),
-              Result,
-              [ header(true)
-              ]),
+    get(SI, lsp_client, LSP),
+    get(LSP, call,
+        'workspace/symbol'(
+            #{ query: From
+             }),
+        Result),
     convlist(symbol_name(From), Result, Symbols),
     chain_list(Matches, Symbols).
 

@@ -30,10 +30,7 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-:- module(my_c_mode,
-          [ lsp_start/1,                        % +Options
-            lsp_stop/0
-          ]).
+:- module(my_c_mode, []).
 :- use_module(library(pce)).
 :- use_module(library(process)).
 :- use_module(library(json_rpc_client)).
@@ -45,9 +42,7 @@
 :- use_module(library(apply)).
 :- use_module(library(pce_util)).
 :- use_module(library(lists)).
-:- use_module(library(error)).
 :- use_module(library(filesex)).
-:- use_module(library(option)).
 :- use_module(lsp_symbol_item).
 
 /** <module> A PceEmacs C mode based on the `clangd` LSP
@@ -69,135 +64,202 @@ library should manage multiple LSP servers for multiple modes.
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
 :- dynamic
-    lsp_connection/1,                           % Stream
     lsp_buffer/3.                               % URI, Buffer, LSP
 
 :- initialization
     listen(pce_emacs(Event), lsp_event(Event)).
 
-%!  lsp_start(+Options) is det.
-%
-%   Start the LSP server.
+                /*******************************
+                *       CLASS LSP CLIENT       *
+                *******************************/
 
-lsp_start(Options) :-
-    findall(Flag, clangd_option(Flag, Options), Flags),
-    process_create(path(clangd),
-                   Flags,
+:- dynamic
+    lsp_client/1.                               % -Client
+
+:- at_halt(disconnect_lsps).
+
+disconnect_lsps :-
+    forall(retract(lsp_client(LSP)),
+           send(LSP, free)).
+
+:- pce_begin_class(lsp_client, object,
+                   "Connect to an LSP server").
+
+variable(workspace,	directory, get, "Workspace root").
+variable(program,	name,	   get, "LSP excutable").
+variable(arguments,	vector,    get, "LSP excutable arguments").
+variable(connection,	prolog*,   get, "The connecting stream").
+
+initialise(LSP, Workspace:workspace=directory,
+           Program:program=name, Argv:arguments=[vector]) :->
+    send_super(LSP, initialise),
+    send(LSP, slot, workspace, Workspace),
+    send(LSP, slot, program, Program),
+    default(Argv, vector, TheArgv),
+    send(LSP, slot, arguments, TheArgv),
+    asserta(lsp_client(LSP)).
+
+unlink(LSP) :->
+    clean_capabilities(LSP),
+    send(LSP, disconnect),
+    send_super(LSP, unlink),
+    retractall(lsp_client(_)).
+
+start(LSP) :->
+    "Connect and initialize"::
+    send(LSP, connect),
+    send(LSP, init).
+
+connect(LSP) :->
+    "Start the LSP server"::
+    get(LSP, program, Prog),
+    get_object(LSP, arguments, Vector),
+    Vector =.. [vector|Argv],
+    process_create(path(Prog),
+                   Argv,
                    [ stdin(pipe(In)),
                      stdout(pipe(Out)),
                      detached(true)
                    ]),
     stream_pair(Stream, Out, In),
-    asserta(lsp_connection(Stream)),
+    send(LSP, slot, connection, Stream),
     json_full_duplex(Stream,
                      [ header(true)
-                     ]),
-    at_halt(lsp_stop(Stream)).
+                     ]).
 
-clangd_option(Flag, Options) :-
-    option(compile_commands_dir(Dir), Options),
-    format(atom(Flag), '--compile-commands-dir=~w', [Dir]).
-clangd_option(Flag, Options) :-
-    (   option(log(Level), Options)
-    ->  true
-    ;   debugging(lsp(process(Level)))
-    ->  true
-    ;   Level = error
-    ),
-    must_be(oneof([error,info,verbose]), Level),
-    format(atom(Flag), '--log=~w', [Level]).
+disconnect(LSP) :->
+    "Stop the connection"::
+    (   get(LSP, connection, Stream),
+        is_stream(Stream)
+    ->  ignore(get(LSP, call, shutdown, _Reply)), % Reply should be `null`
+        ignore(send(LSP, notify, exit)),
+        close(Stream, [force(true)]),
+        send(LSP, slot, connection, @nil)
+    ;   true
+    ).
 
+call(LSP, Message:message=prolog, Options:options=[prolog],
+     Result:prolog) :<-
+    "Make a JSON RPC call"::
+    default(Options, [], TheOptions),
+    get(LSP, connection, Stream),
+    catch(json_call(Stream, Message, Result,
+                    [ header(true)
+                    | TheOptions
+                    ]),
+          Error,
+          rpc_error(Error)).
 
-%!  lsp_stop is det.
-%!  lsp_stop(+Stream) is det.
-%
-%   Stop the LSP server.
+notify(LSP, Message:message=prolog) :->
+    "Send a JSON RPC notification"::
+    get(LSP, connection, Stream),
+    catch(json_notify(Stream, Message,
+                      [ header(true)
+                      ]),
+          Error,
+          rpc_error(Error)).
 
-lsp_stop :-
-    forall(lsp_connection(Stream),
-           lsp_stop(Stream)).
+rpc_error(Error) :-
+    print_message(error, Error),
+    fail.
 
-lsp_stop(Stream) :-
-    lsp_connection(Stream),
-    !,
-    lsp_call(shutdown, _Reply),                 % Reply should be `null`
-    lsp_notify(exit),
-    retract(lsp_connection(Stream)),
-    close(Stream).
-lsp_stop(_).
-
-%!  lsp_init(+Dir, -Result) is det.
-%
-%   Initialize the LSP server for Dir
-
-lsp_init(Dir, Result) :-
+init(LSP) :->
+    "Initialize the LSP connection for a directory"::
+    get(LSP?workspace, path, Dir),
     uri_file_name(URI, Dir),
-    findall(TokType, style(lsp(TokType),_), TokTypes),
-    lsp_call(initialize(
-                 #{ capabilities:
-                      #{ textDocument:
-                           #{ semanticTokens:
-                                #{ dynamicRegistration: false,
-                                   requests:
-                                     #{ full: true,
-                                        range: false
-                                      }
-                                 },
-                              tokenTypes: TokTypes,
-                              tokenModifiers: []
-                            }
-                       },
-                    rootUri: URI
-                  }),
-            Result),
-    clean_capabilities,
-    catch_with_backtrace(register_capabilities(Result.capabilities),
+    get(LSP, call,
+        initialize(
+            #{ capabilities:
+                 #{ textDocument:
+                      #{ semanticTokens:
+                           #{ dynamicRegistration: false,
+                              requests:
+                                #{ full: true,
+                                   range: false
+                                 }
+                            },
+                         tokenTypes: [],
+                         tokenModifiers: []
+                       }
+                  },
+               rootUri: URI
+             }),
+        Result),
+    clean_capabilities(LSP),
+    catch_with_backtrace(register_capabilities(LSP, Result.capabilities),
                          E,
                          print_message(error, E)).
 
 :- dynamic
-    token_type/2,
-    token_modifier/2.
+    token_type/3,                         % LSP, TypeId, TypeName
+    token_modifier/3.                     % LSP, ModId,  ModName
 
-clean_capabilities :-
-    retractall(token_type(_,_)),
-    retractall(token_modifier(_,_)).
+clean_capabilities(LSP) :-
+    retractall(token_type(LSP,_,_)),
+    retractall(token_modifier(LSP,_,_)).
 
-register_capabilities(Capabilities) :-
-    register_token_types(Capabilities.semanticTokensProvider.legend).
+register_capabilities(LSP, Capabilities) :-
+    register_token_types(LSP, Capabilities.semanticTokensProvider.legend).
 
-register_token_types(Legend) :-
+register_token_types(LSP, Legend) :-
     forall(nth0(Id, Legend.tokenTypes, String),
            ( atom_string(TokenType, String),
-             assertz(token_type(Id, TokenType)))),
+             assertz(token_type(LSP, Id, TokenType)))),
     forall(nth0(Id, Legend.tokenModifiers, String),
            ( atom_string(TokenModifier, String),
-             Mask is 1<<Id,
-             assertz(token_modifier(Mask, TokenModifier)))).
+             assertz(token_modifier(LSP, Id, TokenModifier)))).
 
-:- det(token_modifiers/2).
-token_modifiers(0, []) :-
+modifiers(LSP, Mask:mask=int, Modifiers:prolog) :<-
+    "Translate a modifier mask to a list of names"::
+    token_mask_modifiers(LSP, Mask, 0, Modifiers).
+
+:- det(token_mask_modifiers/4).
+
+token_mask_modifiers(_, 0, _, []) :-
     !.
-token_modifiers(Mask, [H|T]) :-
-    token_modifier(M, H),
-    Mask /\ M =\= 0,
-    !,
-    Mask1 is Mask /\ \M,
-    token_modifiers(Mask1, T).
+token_mask_modifiers(LSP, Mask, ModID, List) :-
+    Bit is 1<<ModID,
+    ModID1 is ModID+1,
+    (   Mask /\ Bit =\= 0
+    ->  Mask1 is Bit /\ \Bit,
+        List = [H|T],
+        token_modifier(LSP, ModID, H),
+        token_mask_modifiers(LSP, Mask1, ModID1, T)
+    ;   token_mask_modifiers(LSP, Mask,  ModID1, List)
+    ).
 
+%   ->lsp_execute_command(+Command) is det.
+%
+%   Send a request to execute Command. While  this is a JSON RPC request
+%   and must have an `id`, it is  normally not answered. The async(true)
+%   option ensures we are not waiting for a response.
 
-%!  c_find_project(+File, -Root, -Options) is det.
+execute_command(LSP, Command:prolog) :->
+    "Execute a command on the workspace"::
+    get(LSP, call,
+        'workspace/executeCommand'(
+            #{ command: Command.command,
+               arguments: Command.arguments
+             }),
+        [async(true)],
+        _NoReply).
 
-c_find_project(_File, Root, [compile_commands_dir(CompileCommandsDir)]) :-
+:- pce_end_class(lsp_client).
+
+%!  c_find_project(+File, -Root, -Argv) is det.
+
+c_find_project(_File, Root, [Flag]) :-
     exists_file('compile_commands.json'),
     !,
     absolute_file_name('.', CompileCommandsDir),
-    file_directory_name(CompileCommandsDir, Root).
-c_find_project(File, Root, [compile_commands_dir(CompileCommandsDir)]) :-
+    file_directory_name(CompileCommandsDir, Root),
+    compile_command_flag(CompileCommandsDir, Flag).
+c_find_project(File, Root, [Flag]) :-
     file_directory_name(File, Dir),
     parent_directory(Dir, Parent),
     compile_commands_dir(Parent, CompileCommandsDir),
     !,
+    compile_command_flag(CompileCommandsDir, Flag),
     Root = Parent.
 c_find_project(File, Root, []) :-
     file_directory_name(File, Root).
@@ -219,6 +281,8 @@ compile_commands_dir(Dir, CompileCommandsDir) :-
     !,
     CompileCommandsDir = BuildDir.
 
+compile_command_flag(Dir, Flag) :-
+    format(atom(Flag), '--compile-commands-dir=~w', [Dir]).
 
 %!  lsp_highlight(+TextBuffer)
 %
@@ -228,13 +292,15 @@ compile_commands_dir(Dir, CompileCommandsDir) :-
 lsp_highlight(TB) :-
     send(TB, report, progress, 'LSP highlighting'),
     get(TB, attribute, lsp_tracking, URI),
+    get(TB, attribute, lsp_client, LSP),
     get_time(LSPTime0),
-    lsp_call('textDocument/semanticTokens/full'(
-                 #{ textDocument:
-                      #{ uri: URI
-                       }
-                  }),
-             Result),
+    get(LSP, call,
+        'textDocument/semanticTokens/full'(
+            #{ textDocument:
+                 #{ uri: URI
+                  }
+             }),
+        Result),
     get_time(LSPTime1),
     length(Result.data, Len),
     Tokens is Len//5,
@@ -245,21 +311,21 @@ lsp_highlight(TB) :-
          if(message(@arg1, instance_of, emacs_colour_fragment),
             message(@arg1, free))),
     get_time(FragmentTime0),
-    highlight_tokens(Result.data, TB, 0, 0, 0, 0, Count),
+    highlight_tokens(Result.data, LSP, TB, 0, 0, 0, 0, Count),
     get_time(FragmentTime1),
     FragmentTime is FragmentTime1 - FragmentTime0,
     send(TB, report, progress,
          'Created %d fragments in %.3f seconds', Count, FragmentTime),
     send(TB, report, done).
 
-%!  highlight_tokens(+DeltaTokens, +Buffer, +StartLine, +StartPos,
+%!  highlight_tokens(+DeltaTokens, +LSP, +Buffer, +StartLine, +StartPos,
 %!                   +Offset, +Count0, -Count) is det.
 %
 %   @bug Offset inside the line is measured   in UTF-16 units by LSP. As
 %   is, we use them as Unicode code points.
 
-highlight_tokens([], _, _, _, _, C, C).
-highlight_tokens([IL,IP,Len,Tid,Mid|More], TB, SL0, SP0, O0, C0, C) :-
+highlight_tokens([], _, _, _, _, _, C, C).
+highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
     (   IL == 0
     ->  SL = SL0,
         SP is SP0+IP,
@@ -269,18 +335,19 @@ highlight_tokens([IL,IP,Len,Tid,Mid|More], TB, SL0, SP0, O0, C0, C) :-
         get(TB, scan, O0, line, IL, start, SOL),
         Offset is SOL+IP
     ),
-    token_type(Tid, TokenType),
+    token_type(LSP, Tid, TokenType),
     StyleClass = lsp(TokenType),
     (   style(StyleClass, _)
     ->  debug(lsp(token), '~p:~p[~p]@~p: ~p',
               [SL,SP,Len,Offset,TokenType]),
         style_name(StyleClass, StyleName),
         new(F, emacs_c_fragment(TB, Offset, Len, StyleName)),
+        send(F, slot, lsp_client, LSP),
         send(F, slot, modifiers, Mid),
         C1 is C0+1
     ;   C1 = C0
     ),
-    highlight_tokens(More, TB, SL, SP, Offset, C1, C).
+    highlight_tokens(More, LSP, TB, SL, SP, Offset, C1, C).
 
 
 %!  style(?Class, -Name, -Style) is nondet.
@@ -343,36 +410,24 @@ lsp_icon(hint,    '64x64/lsp-hint.png').
                 *      SERVER CONNECTION       *
                 *******************************/
 
-%ensure_lsp_server(_) :- !, fail.
-ensure_lsp_server(_, c) :-
-    lsp_connection(_),
+ensure_lsp_server(Buffer, _File, c, LSP) :-
+    get(Buffer, attribute, lsp_client, LSP),
     !.
-ensure_lsp_server(File, c) :-
-    c_find_project(File, Root, ProjectOptions),
-    debug(lsp(project),
-          'Found project.  Root=~q, Options=~p',
-          [Root, ProjectOptions]),
-    lsp_start(ProjectOptions),
-    lsp_init(Root, _Result).
-
-lsp_notify(Message) :-
-    lsp_connection(Stream),
-    json_notify(Stream, Message,
-                [ header(true)
-                ]).
-
-%!  lsp_call(++Message, -Result) is det.
-%!  lsp_call(++Message, -Result, +Options) is det.
-
-lsp_call(Message, Result) :-
-    lsp_call(Message, Result, []).
-
-lsp_call(Message, Result, Options) :-
-    lsp_connection(Stream),
-    json_call(Stream, Message, Result,
-              [ header(true)
-              | Options
-              ]).
+ensure_lsp_server(Buffer, _File, c, LSP) :-
+    lsp_client(LSP),
+    !,
+    send(Buffer, attribute, lsp_client, LSP).
+ensure_lsp_server(Buffer, File, c, LSP) :-
+    c_find_project(File, Root, Flags),
+    (   debugging(lsp(process(Level)))	% error,info,verbose
+    ->  true
+    ;   Level = error
+    ),
+    format(atom(LogFlag), '--log=~w', [Level]),
+    Argv =.. [vector,LogFlag|Flags],
+    new(LSP, lsp_client(Root, clangd, Argv)),
+    send(Buffer, attribute, lsp_client, LSP),
+    send(LSP, start).
 
 
                 /*******************************
@@ -384,35 +439,37 @@ lsp_event(opened(Buffer)) :-
     get(Buffer, file, File),
     File \== @nil,
     get(File, path, Path),
-    ensure_lsp_server(Path, Mode),
+    ensure_lsp_server(Buffer, Path, Mode, LSP),
     uri_file_name(URI, Path),
     debug(lsp(file), 'Opened ~p', [URI]),
     get(Buffer, contents, string(Content)),
     send(Buffer, attribute, lsp_version, 1),
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
-    lsp_connection(LSP),
-    asserta(lsp_buffer(URI, Buffer, LSP)),
-    lsp_notify('textDocument/didOpen'(
-                   #{textDocument:
-                       #{ uri: URI,
-                          languageId: "c",
-                          version: 1,
-                          text: Content
-                        }
-                    })).
+    assertz(lsp_buffer(URI, Buffer, LSP)),
+    send(LSP, notify,
+         'textDocument/didOpen'(
+             #{textDocument:
+                 #{ uri: URI,
+                    languageId: "c",
+                    version: 1,
+                    text: Content
+                  }
+              })).
 lsp_event(closed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     debug(lsp(file), 'Closed ~p', [URI]),
-    lsp_connection(LSP),
+    get(Buffer, attribute, lsp_client, LSP),
     retractall(lsp_buffer(URI, Buffer, LSP)),
-    lsp_notify('textDocument/didClose'(
-                   #{textDocument:
-                       #{ uri: URI
-                        }
-                    })).
+    send(LSP, notify,
+         'textDocument/didClose'(
+             #{textDocument:
+                 #{ uri: URI
+                  }
+              })).
 lsp_event(changed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, attribute, lsp_client, LSP),
     get(Buffer, lsp_changes, Changes),
     get(Buffer, attribute, lsp_version, Version0),
     Version is Version0+1,
@@ -429,14 +486,14 @@ lsp_event(changed(Buffer)) :-
                 print_term(JSONChanges, [output(current_output)])
               ])
     ),
-    lsp_notify(
-        'textDocument/didChange'(
-            #{ textDocument:
-                 #{ uri: URI,
-                    version: Version
-                  },
-               contentChanges: JSONChanges
-             })).
+    send(LSP, notify,
+         'textDocument/didChange'(
+             #{ textDocument:
+                  #{ uri: URI,
+                     version: Version
+                   },
+                contentChanges: JSONChanges
+              })).
 
 to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
                              end: #{line: EL, character: EP}
@@ -479,13 +536,13 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
     ),
     #{ uri:URIs, diagnostics: Diagnostics } :< Data,
     atom_string(URI, URIs),
-    lsp_buffer(URI, Buffer, _LSP),
+    lsp_buffer(URI, Buffer, LSP),
     !,
     send(Buffer, for_all_fragments,
          if(message(@arg1, instance_of, emacs_lsp_diagnostic),
             message(@arg1, free))),
     State = counts(0,0,0,0),
-    maplist(show_diagnostic(Buffer, State), Diagnostics),
+    maplist(show_diagnostic(Buffer, LSP, State), Diagnostics),
     report_diagnostic_counts(State, Buffer),
     debug(lsp(diagnostics), 'Counts: ~p', [State]).
 'textDocument/publishDiagnostics'(_).
@@ -499,7 +556,7 @@ report_diagnostic_counts(Counts, Buffer) :-
              message(@arg1, margin_width, 22))
     ).
 
-show_diagnostic(Buffer, State, Diagnostic) :-
+show_diagnostic(Buffer, LSP, State, Diagnostic) :-
     #{range: Range, severity: Severity} :< Diagnostic,
     #{start: Start, end: End} :< Range,
     lsp_offset(Start, Buffer, StartOffset),
@@ -507,7 +564,9 @@ show_diagnostic(Buffer, State, Diagnostic) :-
     Length is EndOffset-StartOffset,
     lsp_severity_type(Severity, _Name, Style),
     step_count(Severity, State),
-    new(_, emacs_lsp_diagnostic(Buffer, StartOffset, Length, Diagnostic, Style)).
+    new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
+                                Diagnostic, Style)),
+    send(D, slot, lsp_client, LSP).
 
 lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
     get(Buffer, lsp_offset, Line, Char, Offset).
@@ -521,20 +580,6 @@ lsp_severity_type(1, error,   lsp_diag_error).
 lsp_severity_type(2, warning, lsp_diag_warning).
 lsp_severity_type(3, info,    lsp_diag_info).
 lsp_severity_type(4, hint,    lsp_diag_hint).
-
-%!  lsp_execute_command(+Command) is det.
-%
-%   Send a request to execute Command. While  this is a JSON RPC request
-%   and must have an `id`, it is  normally not answered. The async(true)
-%   option ensures we are not waiting for a response.
-
-lsp_execute_command(Command) :-
-    lsp_call('workspace/executeCommand'(
-                 #{ command: Command.command,
-                    arguments: Command.arguments
-                  }),
-             _NoReply,
-             [async(true)]).
 
 %!  'workspace/applyEdit'(+Data, -Result) is det.
 %
@@ -619,7 +664,8 @@ delay(Time, Goal) :-
 :- pce_begin_class(emacs_lsp_diagnostic, fragment,
                    "Represent an LSP diagnostic message").
 
-variable(json,    prolog, get, "JSON diagnostic message").
+variable(lsp_client, lsp_client*, get, "Source LSP client").
+variable(json,       prolog,      get, "JSON diagnostic message").
 
 initialise(F, Buffer:text_buffer, Start:int, Len:int,
            JSON:prolog, Style:name) :->
@@ -653,12 +699,14 @@ fixes(F, Fixes:prolog) :<-
     get(F, text_buffer, Buffer),
     get(Buffer, attribute, lsp_tracking, URI),
     get(F, json, Diagnostic),
-    lsp_call('textDocument/codeAction'(
-                 #{ textDocument: #{ uri: URI},
-                    range: Diagnostic.range,
-                    context: #{ diagnostics: [Diagnostic] }
-                  }),
-             Fixes).
+    get(F, lsp_client, LSP),
+    get(LSP, call,
+        'textDocument/codeAction'(
+            #{ textDocument: #{ uri: URI},
+               range: Diagnostic.range,
+               context: #{ diagnostics: [Diagnostic] }
+             }),
+        Fixes).
 
 
 :- det(style_pce_severity/3).
@@ -672,13 +720,15 @@ style_pce_severity(lsp_diag_hint,    status,  'Hint').
 :- pce_begin_class(emacs_c_fragment, emacs_colour_fragment,
                    "Represent an LSP highlight fragment").
 
-variable(modifiers,	int := 0, get, "LSP token type modifiers").
+variable(lsp_client,	lsp_client*, get, "Source LSP client").
+variable(modifiers,	int := 0,    get, "LSP token type modifiers").
 
 identify(F) :->
     "Identify LSP fragments"::
     get(F, style, StyleName),
     get(F, modifiers, Mask),
-    token_modifiers(Mask, Modifiers),
+    get(F, lsp_client, LSP),
+    get(LSP, modifiers, Mask, Modifiers),
     term_string(Style, StyleName),
     phrase(c_fragment_message(Style, Modifiers), Codes),
     string_codes(String, Codes),
@@ -727,7 +777,7 @@ setup_mode(M) :->
     "Setup LSP based C mode"::
     send_super(M, setup_mode),
     send(M, setup_styles),
-    (   lsp_connection(_)
+    (   get(M, attribute, lsp_client, _)
     ->  true
     ;   get(M, text_buffer, Buffer),
         ignore(lsp_event(opened(Buffer))),
@@ -772,9 +822,10 @@ adjust_style(keyword, M, TB, From, Len, Style) =>
 adjust_style(Style0, _M, _TB, _From, _Len, Style) =>
     Style = Style0.
 
-lsp_server(_M, Server:prolog) :<-
+lsp_client(M, LSP:lsp_client) :<-
     "Get the LSP server for this mode"::
-    lsp_connection(Server).
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_client, LSP).
 
 lsp_position(M, For:[int], Pos:prolog) :<-
     "Get LSP compatible position"::
@@ -811,17 +862,20 @@ find_definition(M) :->
 find_symbol_at_caret(M) :->
     "Find definition from current location"::
     get(M, lsp_position, Pos),
-    lsp_call('textDocument/definition'(Pos), Result),
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_client, LSP),
+    get(LSP, call, 'textDocument/definition'(Pos), Result),
     send(M, lsp_edit, Result).
 
 goto_symbol(M, Tag:symbol=lsp_tag) :->
     "Go to the definition of an LSP symbol"::
-    lsp_call('workspace/symbol'(
-                  #{ query: Tag
-                   }),
-              Symbols,
-              [ header(true)
-              ]),
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_client, LSP),
+    get(LSP, call,
+        'workspace/symbol'(
+            #{ query: Tag
+             }),
+        Symbols),
     (   member(Symbol, Symbols),
         atom_string(Tag, Symbol.name)
     ->  send(M, lsp_edit, Symbol.location)
@@ -868,11 +922,14 @@ save_word_location(M) :->
 find_references(M) :->
     "Find references to symbol at caret"::
     get(M, lsp_position, Pos),
-    lsp_call('textDocument/references'(
-                 Pos.put(#{context:
-                             #{ includeDeclaration: true }
-                          })),
-             References),
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_client, LSP),
+    get(LSP, call,
+        'textDocument/references'(
+            Pos.put(#{context:
+                        #{ includeDeclaration: true }
+                     })),
+        References),
     get(M, word, Word),
     new(BM, emacs_bookmark_editor(string('References to %s', Word),
                                   @off)),
@@ -898,16 +955,18 @@ dabbrev_candidates(M, user0:name, Target:name, Completions:chain) :<-
     "Get additional candidates from the LSP server"::
     get(M, text_buffer, TB),
     get(TB, attribute, lsp_tracking, URI),
+    get(TB, attribute, lsp_client, LSP),
     get(M, caret, Caret),
     get(TB, line_number, Caret, Line0),
     Line is Line0-1,
     get(TB, lsp_column, Caret, Char),
-    lsp_call('textDocument/completion'(
-                 #{ textDocument: #{ uri: URI },
-                    position: #{line: Line, character: Char},
-                    context: #{triggerKind: 1}
-                  }),
-             Reply),
+    get(LSP, call,
+        'textDocument/completion'(
+            #{ textDocument: #{ uri: URI },
+               position: #{line: Line, character: Char},
+               context: #{triggerKind: 1}
+             }),
+        Reply),
     convlist(completion(Target), Reply.get(items, []), List),
     chain_list(Completions, List).
 
@@ -978,7 +1037,9 @@ goto_prev_error(M) :->
 :- use_module(library(hyper)).
 
 :- pce_begin_class(emacs_lsp_feedback, dialog,
-                   "Provide feedback on LSP errors").
+                   "Provide feedback on LSP diagnostics").
+
+variable(lsp_client, lsp_client*, get, "Source LSP client").
 
 class_variable(text_width, int, 400).
 
@@ -990,6 +1051,7 @@ initialise(W, Editor:editor, Fragment:emacs_lsp_diagnostic,
     get(TextImage, frame_position, point(OX,OY)),
     get(Editor, frame, Master),
     send_super(W, initialise, "LSP Feedback"),
+    send(W, slot, lsp_client, Fragment?lsp_client),
     send(W, transient_for, Master),
     send(W, kind, popup),
     get(Fragment, icon, Icon),
@@ -1081,7 +1143,8 @@ apply_change(W, TitleObj:string) :->
         #{title:Title} :< Fix
     ->  true
     ),
+    get(W, lsp_client, LSP),
     send(W, destroy),
-    lsp_execute_command(Fix).
+    send(LSP, execute_command, Fix).
 
 :- pce_end_class.
