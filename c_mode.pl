@@ -32,17 +32,16 @@
 
 :- module(my_c_mode, []).
 :- use_module(library(pce)).
+:- use_module(library(emacs_extend), []).
 :- use_module(library(process)).
 :- use_module(library(json_rpc_client)).
 :- use_module(library(json_rpc_server)).
 :- use_module(library(uri)).
 :- use_module(library(broadcast)).
 :- use_module(library(debug)).
-:- use_module(library(pp)).
 :- use_module(library(apply)).
 :- use_module(library(pce_util)).
 :- use_module(library(lists)).
-:- use_module(library(filesex)).
 
 :- use_module(lsp_symbol_item).
 :- use_module(lsp_registry).
@@ -60,7 +59,7 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(file)).
 %:- debug(lsp(highlight)).
 %:- debug(lsp(project)).
-%:- debug(lsp(process(verbose))).
+%:- debug(lsp(log(verbose))).
 %:- debug(lsp(changes)).
 %:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
@@ -78,33 +77,51 @@ library should manage multiple LSP servers for multiple modes.
 :- pce_begin_class(lsp_workspace, object,
                    "Represent a workspace").
 
-variable(root,	directory, get, "Workspace root").
+:- dynamic
+    lsp_workspace/2.                            % Dir, Object
+
+variable(root,	      directory,  get, "Workspace root").
+variable(lsp_clients, sheet,     none, "Running LSP clients").
 
 initialise(WS, Root:root=directory) :->
     "Create a workspace from its root"::
     send_super(WS, initialise),
-    send(WS, slot, root, Root).
+    send(WS, slot, root, Root),
+    send(WS, slot, lsp_clients, new(sheet)),
+    get(Root, path, FullDir),
+    asserta(lsp_workspace(FullDir, WS)).
 
-%!  find_project_root(+File, +Mode, -Root, -Argv) is det.
+lookup(_Ctx, Root:directory, WS:lsp_workspace) :<-
+    "Lookup existing workspace from directory"::
+    get(Root, path, FullDir),
+    lsp_workspace(FullDir, WS).
+
+unlink(WS) :->
+    retractall(lsp_workspace(_, WS)),
+    send_super(WS, unlink).
+
+%!  ensure_lsp_server(+Buffer, +File, +Mode, -LSP) is semidet.
+
+ensure_lsp_server(Buffer, _File, _Mode, LSP) :-
+    get(Buffer, attribute, lsp_client, LSP),
+    !.
+ensure_lsp_server(Buffer, File, Mode, LSP) :-
+    file_workspace(File, Mode, Workspace),
+    get(Workspace, lsp_clients, Mode, Clients),
+    get(Clients, head, LSP),
+    send(Buffer, attribute, lsp_client, LSP).
+
+%!  file_workspace(+File, +Mode, -WorkSpace) is det.
 %
-%   Given File is being opened in the  editor, find the project root for
-%   Mode.
+%   Find or create a workspace for File in Mode.
 
-find_project_root(_File, _Mode, Root, [Flag]) :-
-    exists_file('compile_commands.json'),
-    !,
-    absolute_file_name('.', CompileCommandsDir),
-    file_directory_name(CompileCommandsDir, Root),
-    compile_command_flag(CompileCommandsDir, Flag).
-find_project_root(File, _Mode, Root, [Flag]) :-
-    file_directory_name(File, Dir),
-    parent_directory(Dir, Parent),
-    compile_commands_dir(Parent, CompileCommandsDir),
-    !,
-    compile_command_flag(CompileCommandsDir, Flag),
-    Root = Parent.
-find_project_root(File, _Mode, Root, []) :-
-    file_directory_name(File, Root).
+file_workspace(File, _, WorkSpace) :-
+    parent_directory(File, Parent),
+    lsp_workspace(Parent, WorkSpace),
+    !.
+file_workspace(File, Mode, WorkSpace) :-
+    project_root(File, Root, [mode(Mode)]),
+    new(WorkSpace, lsp_workspace(Root)).
 
 parent_directory(Dir, Dir).
 parent_directory(Dir, Parent) :-
@@ -112,19 +129,26 @@ parent_directory(Dir, Parent) :-
     Direct \== Dir,
     parent_directory(Direct, Parent).
 
-compile_commands_dir(Dir, CompileCommandsDir) :-
-    format(string(Pattern), '~w/build{,.*}', [Dir]),
-    expand_file_name(Pattern, BuildDirs),
-    member(BuildDir, BuildDirs),
-    exists_directory(BuildDir),
-    directory_file_path(BuildDir, 'compile_commands.json',
-                        CompileCommandsFile),
-    exists_file(CompileCommandsFile),
-    !,
-    CompileCommandsDir = BuildDir.
+lsp_clients(WS, Mode:name, Clients:chain) :<-
+    "Get or create LSP clients for mode"::
+    get(WS, slot, lsp_clients, Sheet),
+    (   get(Sheet, value, Mode, Clients)
+    ->  true
+    ;   findall(Client,
+                lsp_create_client(WS, Mode, Client),
+                List),
+        chain_list(Clients, List),
+        send(Sheet, value, Mode, Clients)
+    ).
 
-compile_command_flag(Dir, Flag) :-
-    format(atom(Flag), '--compile-commands-dir=~w', [Dir]).
+lsp_create_client(WS, Mode, LSP) :-
+    get(WS?root, path, Root),
+    lsp_server(Id, Root, Config),
+    memberchk(Mode, Config.modes),
+    new(LSP, lsp_client(Id, WS,
+                        Config.executable,
+                        Config.get(arguments,[]))),
+    send(LSP, start).
 
 :- pce_end_class.
 
@@ -146,14 +170,16 @@ disconnect_lsps :-
 :- pce_begin_class(lsp_client, object,
                    "Connect to an LSP server").
 
-variable(workspace,	directory, get, "Workspace root").
-variable(program,	name,	   get, "LSP excutable").
-variable(arguments,	vector,    get, "LSP excutable arguments").
-variable(connection,	prolog*,   get, "The connecting stream").
+variable(id,		name,          get, "LSP identifier").
+variable(workspace,	lsp_workspace, get, "Workspace root").
+variable(program,	prolog,	       get, "LSP excutable").
+variable(arguments,	vector,        get, "LSP excutable arguments").
+variable(connection,	prolog*,       get, "The connecting stream").
 
-initialise(LSP, Workspace:workspace=directory,
-           Program:program=name, Argv:arguments=[vector]) :->
+initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
+           Program:program=prolog, Argv:arguments=[vector]) :->
     send_super(LSP, initialise),
+    send(LSP, slot, id, Id),
     send(LSP, slot, workspace, Workspace),
     send(LSP, slot, program, Program),
     default(Argv, vector, TheArgv),
@@ -176,7 +202,13 @@ connect(LSP) :->
     get(LSP, program, Prog),
     get_object(LSP, arguments, Vector),
     Vector =.. [vector|Argv],
-    process_create(path(Prog),
+    (   compound(Prog)
+    ->  Exe = Prog
+    ;   is_absolute_file_name(Prog)
+    ->  Exe = Prog
+    ;   Exe = path(Prog)
+    ),
+    process_create(Exe,
                    Argv,
                    [ stdin(pipe(In)),
                      stdout(pipe(Out)),
@@ -226,7 +258,7 @@ rpc_error(Error) :-
 
 init(LSP) :->
     "Initialize the LSP connection for a directory"::
-    get(LSP?workspace, path, Dir),
+    get(LSP?workspace?root, path, Dir),
     uri_file_name(URI, Dir),
     get(LSP, call,
         initialize(
@@ -432,28 +464,6 @@ lsp_icon(hint,    '64x64/lsp-hint.png').
                 /*******************************
                 *      SERVER CONNECTION       *
                 *******************************/
-
-%!  ensure_lsp_server(+Buffer, +File, +Mode, -LSP)
-
-ensure_lsp_server(Buffer, _File, c, LSP) :-
-    get(Buffer, attribute, lsp_client, LSP),
-    !.
-ensure_lsp_server(Buffer, _File, c, LSP) :-
-    lsp_client(LSP),
-    !,
-    send(Buffer, attribute, lsp_client, LSP).
-ensure_lsp_server(Buffer, File, Mode, LSP) :-
-    find_project_root(File, Mode, Root, Flags),
-    (   debugging(lsp(process(Level)))	% error,info,verbose
-    ->  true
-    ;   Level = error
-    ),
-    format(atom(LogFlag), '--log=~w', [Level]),
-    Argv =.. [vector,LogFlag|Flags],
-    new(LSP, lsp_client(Root, clangd, Argv)),
-    send(Buffer, attribute, lsp_client, LSP),
-    send(LSP, start).
-
 
                 /*******************************
                 *           CONNECT            *
