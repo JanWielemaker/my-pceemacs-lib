@@ -59,6 +59,12 @@ lsp_server(clangd, Root,
               modes:      [c,cpp]
             }) :-
     findall(Arg, lsp_argument(clangd, Root, Arg), Argv).
+lsp_server('ltex-ls', Root,
+           #{ executable: path('ltex-ls'),
+              arguments:  Argv,
+              modes:      [markdown,latex,html]
+            }) :-
+    findall(Arg, lsp_argument('ltex-ls', Root, Arg), Argv).
 
 %!  lsp_argument(+Id, +Root, -Arg) is nondet.
 %
@@ -70,11 +76,14 @@ lsp_argument(clangd, Root, Arg) :-
     file_directory_name(CompileCommandsFile, Dir),
     format(atom(Arg), '--compile-commands-dir=~w', [Dir]).
 lsp_argument(clangd, _, Arg) :-
-    (   debugging(lsp(log(Level)))
+    (   debugging(lsp(log(clangd, Level)))
     ->  must_be(oneof([error,info,verbose]), Level)
     ;   Level = error
     ),
     format(atom(Arg), '--log=~w', [Level]).
+lsp_argument('ltex-ls', _, Arg) :-
+    debugging(lsp(log('ltex-ls', File))),
+    format(atom(Arg), '--log-file=~w', [File]).
 
 
                 /*******************************
