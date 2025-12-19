@@ -43,7 +43,9 @@
 :- use_module(library(pce_util)).
 :- use_module(library(lists)).
 :- use_module(library(filesex)).
+
 :- use_module(lsp_symbol_item).
+:- use_module(lsp_registry).
 
 /** <module> A PceEmacs C mode based on the `clangd` LSP
 
