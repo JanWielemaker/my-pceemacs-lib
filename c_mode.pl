@@ -815,11 +815,11 @@ class_variable(idle_timeout,              num, 0.3).
 setup_mode(M) :->
     "Setup LSP based C mode"::
     send_super(M, setup_mode),
-    send(M, setup_styles),
     (   get(M, attribute, lsp_client, _)
-    ->  true
+    ->  send(M, setup_styles)
     ;   get(M, text_buffer, Buffer),
-        ignore(lsp_event(opened(Buffer))),
+        lsp_event(opened(Buffer)),
+        send(M, setup_styles),
         % needs to be called in next event cycle
         new(T, timer(0.1,
                      and(message(M, colourise_buffer),
@@ -904,7 +904,7 @@ find_symbol_at_caret(M) :->
     get(M, text_buffer, TB),
     get(TB, attribute, lsp_client, LSP),
     get(LSP, call, 'textDocument/definition'(Pos), Result),
-    send(M, lsp_edit, Result).
+    send(M, lsp_goto, Result).
 
 goto_symbol(M, Tag:symbol=lsp_tag) :->
     "Go to the definition of an LSP symbol"::
@@ -917,14 +917,14 @@ goto_symbol(M, Tag:symbol=lsp_tag) :->
         Symbols),
     (   member(Symbol, Symbols),
         atom_string(Tag, Symbol.name)
-    ->  send(M, lsp_edit, Symbol.location)
+    ->  send(M, lsp_goto, Symbol.location)
     ;   send(M, report, warning, 'Could not find LSP symbol %s', Tag)
     ).
 
-lsp_edit(M, Location:prolog) :->
-    "Edit a location returned by the LSP server"::
+lsp_goto(M, Location:prolog) :->
+    " a location returned by the LSP server"::
     (   is_list(Location)
-    ->  lsp_select_hit(Location, Hit)
+    ->  lsp_select_hit(Location, M, Hit)
     ;   Hit = Location
     ),
     send(M, save_word_location),
@@ -941,10 +941,11 @@ lsp_edit(M, Location:prolog) :->
     new(Title, string('%s (definition)', Identifier)),
     send(Editor?mode, location_history, title := Title).
 
-lsp_select_hit([Hit], Hit) :-
+lsp_select_hit([Hit], _, Hit) :-
     !.
-lsp_select_hit(Hits, _) :-
-    debug(lsp(location), 'Got these hits: ~p', [Hits]),
+lsp_select_hit(Hits, M, _) :-
+    format(string(String), '~p', [Hits]),
+    send(M, report, warning, 'LSP Locations: %s', String),
     fail.
 
 save_word_location(M) :->
@@ -1015,7 +1016,7 @@ completion(Target, Dict, Completion) :-
 
 
                 /*******************************
-                *            NOTES             *
+                *         DIAGNOSTICS          *
                 *******************************/
 
 selected_fragment(M, Fragment:fragment) :->
@@ -1036,7 +1037,7 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
     (   send(Fragment, instance_of, emacs_lsp_diagnostic)
     ->  get(M, editor, E),
         ignore(send(M, send_hyper, note, destroy)),
-        new(W, emacs_lsp_feedback(E, Fragment, Hover)),
+        new(W, emacs_lsp_diagnostic_window(E, Fragment, Hover)),
         new(_, partof_hyper(M, W, note, mode)),
         send(W, open)
     ;   true
@@ -1075,8 +1076,8 @@ goto_prev_error(M) :->
 :- use_module(library(doc/objects)). % @br, etc.
 :- use_module(library(hyper)).
 
-:- pce_begin_class(emacs_lsp_feedback, dialog,
-                   "Provide feedback on LSP diagnostics").
+:- pce_begin_class(emacs_lsp_diagnostic_window, dialog,
+                   "Show LSP diagnostics in modal window").
 
 variable(lsp_client, lsp_client*, get, "Source LSP client").
 
