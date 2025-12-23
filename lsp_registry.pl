@@ -76,7 +76,8 @@ lsp_argument(clangd, Root, Arg) :-
     file_directory_name(CompileCommandsFile, Dir),
     format(atom(Arg), '--compile-commands-dir=~w', [Dir]).
 lsp_argument(clangd, _, Arg) :-
-    (   debugging(lsp(log(clangd, Level)))
+    (   debugging(lsp(log(clangd, Level))),
+        atom(Level)
     ->  must_be(oneof([error,info,verbose]), Level)
     ;   Level = error
     ),
