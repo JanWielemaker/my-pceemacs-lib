@@ -842,7 +842,8 @@ colourise_buffer(M) :->
     "Use LSP based highlighting"::
     get(M, text_buffer, TB),
     (   get(TB, attribute, lsp_tracking, _URI)
-    ->  lsp_highlight(TB)
+    ->  lsp_highlight(TB),
+        send(M, update_bookmarks)
     ;   send_super(M, colourise_buffer)
     ),
     send(TB, for_all_syntax,
