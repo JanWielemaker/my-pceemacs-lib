@@ -54,7 +54,7 @@ emacs_prompt:make_item_hook(Mode, Label, Default, Type, History, Item) :-
 :- pce_begin_class(lsp_symbol_item, text_item,
                    "Find a symbol on the LSP server").
 
-variable(lsp_server, lsp_client, get, "Connected LSP client").
+variable(lsp_client, lsp_client, get, "Connected LSP client").
 
 initialise(SI, Name:label=[name], Def:default=[char_array],
            Msg:message=[code]*, LSP:lsp_client=[lsp_client]) :->
