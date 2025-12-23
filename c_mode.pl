@@ -70,6 +70,9 @@ library should manage multiple LSP servers for multiple modes.
 :- initialization
     listen(pce_emacs(Event), lsp_event(Event)).
 
+:- meta_predicate
+    for_sheet(+, 2).
+
                 /*******************************
                 *     CLASS LSP WORKSPACE      *
                 *******************************/
@@ -81,7 +84,7 @@ library should manage multiple LSP servers for multiple modes.
     lsp_workspace/2.                            % Dir, Object
 
 variable(root,	      directory,  get, "Workspace root").
-variable(lsp_clients, sheet,     none, "Running LSP clients").
+variable(lsp_clients, sheet,     none, "Mode -> chain(LSP client)").
 
 initialise(WS, Root:root=directory) :->
     "Create a workspace from its root"::
@@ -100,16 +103,18 @@ unlink(WS) :->
     retractall(lsp_workspace(_, WS)),
     send_super(WS, unlink).
 
-%!  ensure_lsp_server(+Buffer, +File, +Mode, -LSP) is semidet.
+%!  ensure_lsp_server(+Buffer, +File, +Mode, -Sheet) is semidet.
+%
+%   True when sheet is a mapping Id->LSPClient for the clients
+%   to use for Buffer.
 
-ensure_lsp_server(Buffer, _File, _Mode, LSP) :-
-    get(Buffer, attribute, lsp_client, LSP),
+ensure_lsp_server(Buffer, _File, _Mode, Clients) :-
+    get(Buffer, attribute, lsp_clients, Clients),
     !.
-ensure_lsp_server(Buffer, File, Mode, LSP) :-
+ensure_lsp_server(Buffer, File, Mode, Clients) :-
     file_workspace(File, Mode, Workspace),
     get(Workspace, lsp_clients, Mode, Clients),
-    get(Clients, head, LSP),
-    send(Buffer, attribute, lsp_client, LSP).
+    send(Buffer, attribute, lsp_clients, Clients).
 
 %!  file_workspace(+File, +Mode, -WorkSpace) is det.
 %
@@ -129,19 +134,25 @@ parent_directory(Dir, Parent) :-
     Direct \== Dir,
     parent_directory(Direct, Parent).
 
-lsp_clients(WS, Mode:name, Clients:chain) :<-
+%   <-lsp_clients
+%
+%   Associate relevant LSP clients  to  a   mode.  The  LSP  clients are
+%   organised in a sheet, mapping the  primary   id  to the client. This
+%   allows modes to dispatch certain LSP   services  to specific clients
+%   based on the client id.
+
+lsp_clients(WS, Mode:name, Clients:sheet) :<-
     "Get or create LSP clients for mode"::
     get(WS, slot, lsp_clients, Sheet),
     (   get(Sheet, value, Mode, Clients)
     ->  true
-    ;   findall(Client,
-                lsp_create_client(WS, Mode, Client),
-                List),
-        chain_list(Clients, List),
+    ;   new(Clients, sheet),
+        lsp_create_client(WS, Mode, Id, Client),
+        send(Clients, value, Id, Client),
         send(Sheet, value, Mode, Clients)
     ).
 
-lsp_create_client(WS, Mode, LSP) :-
+lsp_create_client(WS, Mode, Id, LSP) :-
     get(WS?root, path, Root),
     lsp_server(Id, Root, Config),
     memberchk(Mode, Config.modes),
@@ -347,7 +358,8 @@ execute_command(LSP, Command:prolog) :->
 lsp_highlight(TB) :-
     send(TB, report, progress, 'LSP highlighting'),
     get(TB, attribute, lsp_tracking, URI),
-    get(TB, attribute, lsp_client, LSP),
+    get(TB, attribute, lsp_clients, Sheet),
+    get(Sheet, value, clangd, LSP),      % For now
     get_time(LSPTime0),
     get(LSP, call,
         'textDocument/semanticTokens/full'(
@@ -462,25 +474,28 @@ lsp_icon(hint,    '64x64/lsp-hint.png').
 
 
                 /*******************************
-                *      SERVER CONNECTION       *
-                *******************************/
-
-                /*******************************
                 *           CONNECT            *
                 *******************************/
+
+:- discontiguous
+    lsp_event/1.
 
 lsp_event(opened(Buffer)) :-
     get(Buffer, mode, Mode),
     get(Buffer, file, File),
     File \== @nil,
     get(File, path, Path),
-    ensure_lsp_server(Buffer, Path, Mode, LSP),
+    ensure_lsp_server(Buffer, Path, Mode, Clients),
     uri_file_name(URI, Path),
     debug(lsp(file), 'Opened ~p', [URI]),
     get(Buffer, contents, string(Content)),
     send(Buffer, attribute, lsp_version, 1),
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
+    for_sheet(Clients,
+              document_open(URI, Buffer, Content)).
+
+document_open(URI, Buffer, Content, _Id, LSP) :-
     assertz(lsp_buffer(URI, Buffer, LSP)),
     send(LSP, notify,
          'textDocument/didOpen'(
@@ -491,10 +506,15 @@ lsp_event(opened(Buffer)) :-
                     text: Content
                   }
               })).
+
 lsp_event(closed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     debug(lsp(file), 'Closed ~p', [URI]),
-    get(Buffer, attribute, lsp_client, LSP),
+    get(Buffer, attribute, lsp_clients, Clients),
+    for_sheet(Clients,
+              document_close(URI, Buffer)).
+
+document_close(URI, Buffer, _Id, LSP) :-
     retractall(lsp_buffer(URI, Buffer, LSP)),
     send(LSP, notify,
          'textDocument/didClose'(
@@ -502,9 +522,10 @@ lsp_event(closed(Buffer)) :-
                  #{ uri: URI
                   }
               })).
+
 lsp_event(changed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
-    get(Buffer, attribute, lsp_client, LSP),
+    get(Buffer, attribute, lsp_clients, Clients),
     get(Buffer, lsp_changes, Changes),
     get(Buffer, attribute, lsp_version, Version0),
     Version is Version0+1,
@@ -521,6 +542,9 @@ lsp_event(changed(Buffer)) :-
                 print_term(JSONChanges, [output(current_output)])
               ])
     ),
+    for_sheet(Clients, document_changed(URI, Version, JSONChanges)).
+
+document_changed(URI, Version, JSONChanges, _Id, LSP) :-
     send(LSP, notify,
          'textDocument/didChange'(
              #{ textDocument:
@@ -1189,3 +1213,25 @@ apply_change(W, TitleObj:string) :->
     send(LSP, execute_command, Fix).
 
 :- pce_end_class.
+
+
+                /*******************************
+                *             UTIL             *
+                *******************************/
+
+%!  for_sheet(+Sheet, :Action) is semidet.
+%
+%   Call call(Action, Name, Value) for each attribute in Sheet.
+
+for_sheet(Sheet, Action) :-
+    get(Sheet, '_arity', Count),
+    for_sheet_loop(1, Count, Sheet, Action).
+
+for_sheet_loop(I, Count, Sheet, Action) :-
+    I =< Count,
+    !,
+    get(Sheet, '_arg', I, attribute(Name, Value)),
+    once(call(Action, Name, Value)),
+    I2 is I+1,
+    for_sheet_loop(I2, Count, Sheet, Action).
+for_sheet_loop(_I, _Count, _Sheet, _Action).
