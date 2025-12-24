@@ -93,17 +93,40 @@ lsp_argument('ltex-ls', _, Arg) :-
 
 %!  project_root(+File, -Root, +Options) is det.
 %
-%   Find the project root given a specific file.
+%   Find the project root given a specific file.  Options:
+%
+%     - from(?Source)
+%       Source is the way the root was found.  Currently supported
+%       ways:
+%
+%         - git
+%           Find the git root directory.  Finds the toplevel project
+%           when inside a submodule.
+%         - file
+%           Last resort, returning the directory of File.
+%     - mode(+Mode)
+%       Edit mode we will use for File.
 
+:- discontiguous
+    project_root/4.
+
+:- det(project_root/3).
 project_root(File, Root, Options) :-
     option(from(Source), Options, _),
-    project_root(Source, File, Root, Options).
+    project_root(Source, File, Root, Options),
+    !.
 
-%!  project_root(+From, +File, -Root, +Options)
+%!  project_root(+From, +File, -Root, +Options) is semidet.
 %
 %   Find the project root using some technique.
 
-project_root(git, File, Root, _Options) :-
+                                        % GIT support
+project_root(git, File, Root, Options) :-
+    catch(project_root_(git, File, Root, Options),
+          error(_,_),
+          fail).
+
+project_root_(git, File, Root, _Options) :-
     (   dir_from_git(File, '--show-superproject-working-tree', Root0)
     ->  Root = Root0
     ;   dir_from_git(File, '--show-toplevel', Root)
@@ -114,12 +137,19 @@ dir_from_git(File, How, Root) :-
     setup_call_cleanup(
         process_create(path(git),
                        [ '-C', Dir, 'rev-parse', How ],
-                       [ stdout(pipe(Out)) ]),
+                       [ stdout(pipe(Out)),
+                         stderr(null)
+                       ]),
         read_string(Out, _, Result),
         close(Out)),
     split_string(Result, "\n", "\n\r\t\s", [Line]),
     Line \== "",
     atom_string(Root, Line).
+
+                                        % Last resort: from file.
+project_root(file, File, Root, _Options) :-
+    file_directory_name(File, Root).
+
 
                 /*******************************
                 *        CMAKE SUPPORT         *

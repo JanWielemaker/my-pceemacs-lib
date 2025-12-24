@@ -350,16 +350,14 @@ execute_command(LSP, Command:prolog) :->
 
 :- pce_end_class(lsp_client).
 
-%!  lsp_highlight(+TextBuffer)
+%!  lsp_highlight(+TextBuffer, +LSPId) is semidet.
 %
 %   Do LSP based highlighting. Asks  for   the  tokens and applies them.
 %   This seems to work fairly well, even for big files.
 
-lsp_highlight(TB) :-
-    send(TB, report, progress, 'LSP highlighting'),
+lsp_highlight(TB, LSP) :-
     get(TB, attribute, lsp_tracking, URI),
-    get(TB, attribute, lsp_clients, Sheet),
-    get(Sheet, value, clangd, LSP),      % For now
+    send(TB, report, progress, 'LSP highlighting'),
     get_time(LSPTime0),
     get(LSP, call,
         'textDocument/semanticTokens/full'(
@@ -689,8 +687,8 @@ apply_buffer_changes_(Buffer, Changes) :-
     sort(offset, >=, Descriptions, Ordered),
     maplist(apply_change(Buffer), Ordered),
     send(Buffer, mark_undo),
-    broadcast(pce_emacs(changed(Buffer))),
-    delay(0.1, lsp_highlight(Buffer)).
+    broadcast(pce_emacs(changed(Buffer))).
+%   delay(0.1, lsp_highlight(Buffer)).
 
 change_description(Buffer, Change,
                    #{offset: StartOffset, length: Length, text:String}) :-
@@ -836,10 +834,16 @@ format(Fmt, Args, Head, Tail) :-
 class_variable(auto_colourise_size_limit, int, 400000).
 class_variable(idle_timeout,              num, 0.3).
 
+%!  role(+Role, -LSPId)
+
+role(highlight, clangd).
+role(symbol,    clangd).
+role(complete,  clangd).
+
 setup_mode(M) :->
     "Setup LSP based C mode"::
     send_super(M, setup_mode),
-    (   get(M, attribute, lsp_client, _)
+    (   get(M, attribute, lsp_clients, _)
     ->  send(M, setup_styles)
     ;   get(M, text_buffer, Buffer),
         lsp_event(opened(Buffer)),
@@ -865,11 +869,21 @@ setup_styles(M) :->
 colourise_buffer(M) :->
     "Use LSP based highlighting"::
     get(M, text_buffer, TB),
-    (   get(TB, attribute, lsp_tracking, _URI)
-    ->  lsp_highlight(TB),
-        send(M, update_bookmarks)
+    (   get(M, lsp_client, highlight, LSP),
+        lsp_highlight(TB, LSP)
+    ->  send(M, update_bookmarks)
     ;   send_super(M, colourise_buffer)
     ),
+    send(M, highlight_c).
+
+%   ->highlight_c
+%
+%   Perform basic C syntax highlighting.  This deals with comments
+%   and C keyboards
+
+highlight_c(M) :->
+    "Basic C syntax highlighting"::
+    get(M, text_buffer, TB),
     send(TB, for_all_syntax,
          message(M, highlight, @arg1, @arg2 - @arg1, @arg3)).
 
@@ -886,10 +900,19 @@ adjust_style(keyword, M, TB, From, Len, Style) =>
 adjust_style(Style0, _M, _TB, _From, _Len, Style) =>
     Style = Style0.
 
-lsp_client(M, LSP:lsp_client) :<-
+%   <-lsp_client
+%
+%   Find the LSP client to implement a specific role for this mode.
+
+lsp_client(M, Role:[name], LSP:lsp_client) :<-
     "Get the LSP server for this mode"::
     get(M, text_buffer, TB),
-    get(TB, attribute, lsp_client, LSP).
+    get(TB, attribute, lsp_clients, Clients),
+    (   Role == @default
+    ->  get(Clients, '_arg', 1, attribute(_Role, LSP))
+    ;   role(Role, LSPId),
+        get(Clients, value, LSPId, LSP)
+    ).
 
 lsp_position(M, For:[int], Pos:prolog) :<-
     "Get LSP compatible position"::
@@ -918,23 +941,23 @@ on_symbol(M) :->
 
 find_definition(M) :->
     "LSP based find definition"::
-    (   send(M, on_symbol)
-    ->  send(M, find_symbol_at_caret)
-    ;   send(M, noarg_call, goto_symbol)
+    (   get(M, lsp_client, symbol, LSP)
+    ->  (   send(M, on_symbol)
+        ->  send(M, find_symbol_at_caret, LSP)
+        ;   send(M, noarg_call, goto_symbol)
+        )
+    ;   send(M, noarg_call, find_tag)
     ).
 
-find_symbol_at_caret(M) :->
+find_symbol_at_caret(M, LSP) :->
     "Find definition from current location"::
     get(M, lsp_position, Pos),
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_client, LSP),
     get(LSP, call, 'textDocument/definition'(Pos), Result),
     send(M, lsp_goto, Result).
 
 goto_symbol(M, Tag:symbol=lsp_tag) :->
     "Go to the definition of an LSP symbol"::
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_client, LSP),
+    get(M, lsp_client, symbol, LSP),
     get(LSP, call,
         'workspace/symbol'(
             #{ query: Tag
@@ -987,8 +1010,7 @@ save_word_location(M) :->
 find_references(M) :->
     "Find references to symbol at caret"::
     get(M, lsp_position, Pos),
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_client, LSP),
+    get(M, lsp_client, symbol, LSP),
     get(LSP, call,
         'textDocument/references'(
             Pos.put(#{context:
@@ -1020,7 +1042,7 @@ dabbrev_candidates(M, user0:name, Target:name, Completions:chain) :<-
     "Get additional candidates from the LSP server"::
     get(M, text_buffer, TB),
     get(TB, attribute, lsp_tracking, URI),
-    get(TB, attribute, lsp_client, LSP),
+    get(M, lsp_client, complete, LSP),
     get(M, caret, Caret),
     get(TB, line_number, Caret, Line0),
     Line is Line0-1,
