@@ -643,7 +643,7 @@ show_diagnostic(Buffer, LSP, State, Diagnostic) :-
     lsp_severity_type(Severity, _Name, Style),
     step_count(Severity, State),
     new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
-                                Diagnostic, Style)),
+                            Diagnostic, Style)),
     send(D, slot, lsp_client, LSP).
 
 lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
@@ -1111,7 +1111,7 @@ show_fragment_note(M, Fragment:fragment, Hover:[bool]) :->
     ;   true
     ).
 
-goto_error(M, Dir:direction={next,prev}) :->
+goto_diagnostic(M, Dir:direction={next,prev}) :->
     "Goto the next/prev LSP diagnostic"::
     get(M, caret, Caret),
     (   (   Dir == next
@@ -1133,11 +1133,11 @@ goto_error(M, Dir:direction={next,prev}) :->
 
 goto_next_error(M) :->
     "Go to the next LSP diagnostic"::
-    send(M, goto_error, next).
+    send(M, goto_diagnostic, next).
 
-goto_prev_error(M) :->
+goto_next_error(M) :->
     "Go to the previous LSP diagnostic"::
-    send(M, goto_error, prev).
+    send(M, goto_diagnostic, prev).
 
 :- emacs_end_mode.
 
