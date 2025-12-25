@@ -37,13 +37,17 @@
 :- use_module(library(pce)).
 :- use_module(library(doc/objects)). % @br, etc.
 :- use_module(library(hyper)).
+:- use_module(library(apply)).
+:- use_module(library(debug)).
+:- use_module(library(lists)).
+:- use_module(library(pce_util)).
 
 /** <module> Handle LSP disagnostic messages
 
 This  module  provides  the  infrastructucture  to  deal  with  the  LSP
-initiated ``textDocument/publishDiagnostics()`` method. It  provides the
-mapping to fragments, hovering and   selecting  fragments and initiating
-"fix available" edits.
+initiated ``textDocument/publishDiagnostics()`` method. It extends class
+`emacs_buffer` to create `emacs_lsp_diagnostic`  fragments, hovering and
+selecting fragments and initiating "fix available" edits.
 */
 
 %!  lsp_severity_type(?LSPLevel, ?LSPName, ?FragmentStyle).
@@ -142,6 +146,55 @@ goto_next_error(M) :->
     send(M, goto_lsp_diagnostic, prev).
 
 :- emacs_end_mode.
+
+
+                /*******************************
+                *     EXTEND EMACS BUFFER      *
+                *******************************/
+
+:- pce_extend_class(emacs_buffer).
+
+lsp_publish_diagnostics(Buffer, LSP:lsp_client, Diagnostics:prolog) :->
+    "Create fragments from diagnostics"::
+    send(Buffer, for_all_fragments,
+         if(message(@arg1, instance_of, emacs_lsp_diagnostic),
+            message(@arg1, free))),
+    State = counts(0,0,0,0),
+    maplist(show_diagnostic(Buffer, LSP, State), Diagnostics),
+    report_diagnostic_counts(State, Buffer),
+    debug(lsp(diagnostics), 'Counts: ~p', [State]).
+
+report_diagnostic_counts(Counts, Buffer) :-
+    Counts = counts(E,W,I,H),
+    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H),
+    (   Counts == counts(0,0,0,0)
+    ->  true
+    ;   send(Buffer?editors, for_all,
+             message(@arg1, margin_width, 22))
+    ).
+
+show_diagnostic(Buffer, LSP, State, Diagnostic) :-
+    #{range: Range, severity: Severity} :< Diagnostic,
+    #{start: Start, end: End} :< Range,
+    lsp_offset(Start, Buffer, StartOffset),
+    lsp_offset(End, Buffer, EndOffset),
+    Length is EndOffset-StartOffset,
+    lsp_severity_type(Severity, _Name, Style),
+    step_count(Severity, State),
+    new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
+                                Diagnostic, Style)),
+    send(D, slot, lsp_client, LSP).
+
+lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
+    get(Buffer, lsp_offset, Line, Char, Offset).
+
+step_count(Severity, State) :-
+    arg(Severity, State, C0),
+    C is C0+1,
+    nb_setarg(Severity, State, C).
+
+
+:- pce_end_class.
 
 
                 /*******************************

@@ -610,43 +610,8 @@ uri_buffer(URIs, Buffer) :-
     #{ uri:URI, diagnostics: Diagnostics } :< Data,
     uri_buffer(URI, Buffer),
     !,
-    send(Buffer, for_all_fragments,
-         if(message(@arg1, instance_of, emacs_lsp_diagnostic),
-            message(@arg1, free))),
-    State = counts(0,0,0,0),
-    maplist(show_diagnostic(Buffer, LSP, State), Diagnostics),
-    report_diagnostic_counts(State, Buffer),
-    debug(lsp(diagnostics), 'Counts: ~p', [State]).
+    send(Buffer, lsp_publish_diagnostics, LSP, Diagnostics).
 'textDocument/publishDiagnostics'(_).
-
-report_diagnostic_counts(Counts, Buffer) :-
-    Counts = counts(E,W,I,H),
-    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H),
-    (   Counts == counts(0,0,0,0)
-    ->  true
-    ;   send(Buffer?editors, for_all,
-             message(@arg1, margin_width, 22))
-    ).
-
-show_diagnostic(Buffer, LSP, State, Diagnostic) :-
-    #{range: Range, severity: Severity} :< Diagnostic,
-    #{start: Start, end: End} :< Range,
-    lsp_offset(Start, Buffer, StartOffset),
-    lsp_offset(End, Buffer, EndOffset),
-    Length is EndOffset-StartOffset,
-    lsp_severity_type(Severity, _Name, Style),
-    step_count(Severity, State),
-    new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
-                                Diagnostic, Style)),
-    send(D, slot, lsp_client, LSP).
-
-lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
-    get(Buffer, lsp_offset, Line, Char, Offset).
-
-step_count(Severity, State) :-
-    arg(Severity, State, C0),
-    C is C0+1,
-    nb_setarg(Severity, State, C).
 
 %!  'workspace/applyEdit'(+Data, -Result) is det.
 %
@@ -713,6 +678,9 @@ apply_change(Buffer, #{offset: Start, length: Length, text:String}) :-
           [Buffer, Start, Length, String]),
     send(Buffer, delete, Start, Length),
     send(Buffer, insert, Start, String).
+
+lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
+    get(Buffer, lsp_offset, Line, Char, Offset).
 
 :- meta_predicate
     delay(+, 0).
