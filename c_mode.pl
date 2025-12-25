@@ -222,10 +222,18 @@ connect(LSP) :->
                    ]),
     stream_pair(Stream, Out, In),
     send(LSP, slot, connection, Stream),
+    client_thread_alias(LSP, Alias),
     json_full_duplex(Stream,
-                     [ header(true)
+                     [ header(true),
+                       thread_alias(Alias)
                      ]),
     asserta(lsp_client(LSP, Stream)).
+
+
+client_thread_alias(LSP, Alias) :-
+    get(LSP, id, Id),
+    get(LSP?workspace?root, path, Root),
+    format(atom(Alias), '~w@~w', [Id, Root]).
 
 disconnect(LSP) :->
     "Stop the connection"::
