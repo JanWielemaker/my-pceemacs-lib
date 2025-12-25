@@ -64,9 +64,6 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
-:- dynamic
-    lsp_buffer/3.                               % URI, Buffer, LSP
-
 :- initialization
     listen(pce_emacs(Event), lsp_event(Event)).
 
@@ -170,12 +167,12 @@ lsp_create_client(WS, Mode, Id, LSP) :-
                 *******************************/
 
 :- dynamic
-    lsp_client/1.                               % -Client
+    lsp_client/2.                               % ?Client, ?Stream
 
 :- at_halt(disconnect_lsps).
 
 disconnect_lsps :-
-    forall(retract(lsp_client(LSP)),
+    forall(retract(lsp_client(LSP, _Stream)),
            send(LSP, free)).
 
 :- pce_begin_class(lsp_client, object,
@@ -194,14 +191,12 @@ initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
     send(LSP, slot, workspace, Workspace),
     send(LSP, slot, program, Program),
     default(Argv, vector, TheArgv),
-    send(LSP, slot, arguments, TheArgv),
-    asserta(lsp_client(LSP)).
+    send(LSP, slot, arguments, TheArgv).
 
 unlink(LSP) :->
     clean_capabilities(LSP),
     send(LSP, disconnect),
-    send_super(LSP, unlink),
-    retractall(lsp_client(_)).
+    send_super(LSP, unlink).
 
 start(LSP) :->
     "Connect and initialize"::
@@ -229,13 +224,15 @@ connect(LSP) :->
     send(LSP, slot, connection, Stream),
     json_full_duplex(Stream,
                      [ header(true)
-                     ]).
+                     ]),
+    asserta(lsp_client(LSP, Stream)).
 
 disconnect(LSP) :->
     "Stop the connection"::
     (   get(LSP, connection, Stream),
         is_stream(Stream)
-    ->  ignore(get(LSP, call, shutdown, _Reply)), % Reply should be `null`
+    ->  retractall(lsp_client(LSP, _)),
+        ignore(get(LSP, call, shutdown, _Reply)), % Reply should be `null`
         ignore(send(LSP, notify, exit)),
         close(Stream, [force(true)]),
         send(LSP, slot, connection, @nil)
@@ -313,21 +310,24 @@ register_token_types(LSP, Legend) :-
            ( atom_string(TokenModifier, String),
              assertz(token_modifier(LSP, Id, TokenModifier)))).
 
+%   <-modifiers
+%
+%   Translate the token modifier mask into a list of modifier names.
+
 modifiers(LSP, Mask:mask=int, Modifiers:prolog) :<-
     "Translate a modifier mask to a list of names"::
     token_mask_modifiers(LSP, Mask, 0, Modifiers).
 
 :- det(token_mask_modifiers/4).
-
 token_mask_modifiers(_, 0, _, []) :-
     !.
 token_mask_modifiers(LSP, Mask, ModID, List) :-
     Bit is 1<<ModID,
     ModID1 is ModID+1,
-    (   Mask /\ Bit =\= 0
+    (   Mask /\ Bit =\= 0,
+        token_modifier(LSP, ModID, H)
     ->  Mask1 is Bit /\ \Bit,
         List = [H|T],
-        token_modifier(LSP, ModID, H),
         token_mask_modifiers(LSP, Mask1, ModID1, T)
     ;   token_mask_modifiers(LSP, Mask,  ModID1, List)
     ).
@@ -491,10 +491,9 @@ lsp_event(opened(Buffer)) :-
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
     for_sheet(Clients,
-              document_open(URI, Buffer, Content)).
+              document_open(URI, Content)).
 
-document_open(URI, Buffer, Content, _Id, LSP) :-
-    assertz(lsp_buffer(URI, Buffer, LSP)),
+document_open(URI, Content, _Id, LSP) :-
     send(LSP, notify,
          'textDocument/didOpen'(
              #{textDocument:
@@ -510,10 +509,9 @@ lsp_event(closed(Buffer)) :-
     debug(lsp(file), 'Closed ~p', [URI]),
     get(Buffer, attribute, lsp_clients, Clients),
     for_sheet(Clients,
-              document_close(URI, Buffer)).
+              document_close(URI)).
 
-document_close(URI, Buffer, _Id, LSP) :-
-    retractall(lsp_buffer(URI, Buffer, LSP)),
+document_close(URI, _Id, LSP) :-
     send(LSP, notify,
          'textDocument/didClose'(
              #{textDocument:
@@ -581,6 +579,21 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
             }
          }) : true.
 
+%!  lsp_calling(-LSP) is det.
+%
+%   True when the method is called from LSP.
+
+:- det(lsp_calling/1).
+lsp_calling(LSP) :-
+    nb_current(json_rpc_stream, Stream),
+    lsp_client(LSP, Stream).
+
+uri_buffer(URIs, Buffer) :-
+    uri_file_name(URIs, File),
+    get(@emacs, file_buffer, File, Buffer),
+    get(Buffer, attribute, lsp_tracking, URI),
+    atom_string(URI, URIs).
+
 %!  'textDocument/publishDiagnostics'(+Data)
 %
 %   Sent after we  send  a  didOpen   or  didChange  notification.  This
@@ -591,9 +604,9 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
     ->  pp(Data)
     ;   true
     ),
-    #{ uri:URIs, diagnostics: Diagnostics } :< Data,
-    atom_string(URI, URIs),
-    lsp_buffer(URI, Buffer, LSP),
+    lsp_calling(LSP),
+    #{ uri:URI, diagnostics: Diagnostics } :< Data,
+    uri_buffer(URI, Buffer),
     !,
     send(Buffer, for_all_fragments,
          if(message(@arg1, instance_of, emacs_lsp_diagnostic),
@@ -665,7 +678,7 @@ apply_edits(Data) :-
     maplist(apply_edit, Pairs).
 
 apply_edit(FileURI-Changes) :-
-    lsp_buffer(FileURI, Buffer, _LSP),
+    uri_buffer(FileURI, Buffer),
     apply_buffer_changes(Buffer, Changes).
 apply_edit(FileURI-Changes) :-
     uri_file_name(FileURI, File),
