@@ -62,12 +62,6 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
-:- initialization
-    listen(pce_emacs(Event), lsp_event(Event)).
-
-:- meta_predicate
-    for_sheet(+, 2).
-
 %!  lsp_highlight(+TextBuffer, +LSPId) is semidet.
 %
 %   Do LSP based highlighting. Asks  for   the  tokens and applies them.
@@ -183,99 +177,6 @@ style(Diagnostic,      Properties) :-
 
 
                 /*******************************
-                *           CONNECT            *
-                *******************************/
-
-:- discontiguous
-    lsp_event/1.
-
-lsp_event(opened(Buffer)) :-
-    get(Buffer, mode, Mode),
-    get(Buffer, file, File),
-    File \== @nil,
-    get(File, path, Path),
-    ensure_lsp_server(Buffer, Path, Mode, Clients),
-    uri_file_name(URI, Path),
-    debug(lsp(file), 'Opened ~p', [URI]),
-    get(Buffer, contents, string(Content)),
-    send(Buffer, attribute, lsp_version, 1),
-    send(Buffer, attribute, lsp_tracking, URI),
-    send(Buffer, lsp_changes, @on),
-    for_sheet(Clients,
-              document_open(URI, Content)).
-
-document_open(URI, Content, _Id, LSP) :-
-    send(LSP, notify,
-         'textDocument/didOpen'(
-             #{textDocument:
-                 #{ uri: URI,
-                    languageId: "c",
-                    version: 1,
-                    text: Content
-                  }
-              })).
-
-lsp_event(closed(Buffer)) :-
-    get(Buffer, attribute, lsp_tracking, URI),
-    debug(lsp(file), 'Closed ~p', [URI]),
-    get(Buffer, attribute, lsp_clients, Clients),
-    for_sheet(Clients,
-              document_close(URI)).
-
-document_close(URI, _Id, LSP) :-
-    send(LSP, notify,
-         'textDocument/didClose'(
-             #{textDocument:
-                 #{ uri: URI
-                  }
-              })).
-
-lsp_event(changed(Buffer)) :-
-    get(Buffer, attribute, lsp_tracking, URI),
-    get(Buffer, attribute, lsp_clients, Clients),
-    get(Buffer, lsp_changes, Changes),
-    get(Buffer, attribute, lsp_version, Version0),
-    Version is Version0+1,
-    send(Buffer, attribute, lsp_version, Version),
-    (   Changes == @nil
-    ->  get(Buffer, contents, string(Content)),
-        JSONChanges = [ #{text: Content} ],
-        debug(lsp(changes), 'Sending whole buffer for ~p', [Buffer]),
-        send(Buffer, lsp_changes, @on)      % re-enable incremental
-    ;   chain_list(Changes, ChangeList),
-        maplist(to_json, ChangeList, JSONChanges),
-        debug(lsp(changes), '~p: changes: ~@',
-              [ Buffer,
-                print_term(JSONChanges, [output(current_output)])
-              ])
-    ),
-    for_sheet(Clients, document_changed(URI, Version, JSONChanges)).
-
-document_changed(URI, Version, JSONChanges, _Id, LSP) :-
-    send(LSP, notify,
-         'textDocument/didChange'(
-             #{ textDocument:
-                  #{ uri: URI,
-                     version: Version
-                   },
-                contentChanges: JSONChanges
-              })).
-
-to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
-                             end: #{line: EL, character: EP}
-                           },
-                   rangeLength: ULen,
-                   text: Text
-                 }) :-
-    object(Change, text_change(SL, SP, EL, EP, TextObj)),
-    get(Change, length, ULen),
-    (   TextObj == @nil
-    ->  Text = ""
-    ;   object(TextObj, string(Text))
-    ).
-
-
-                /*******************************
                 *           FRAGMENT           *
                 *******************************/
 
@@ -348,7 +249,7 @@ setup_mode(M) :->
     (   get(M, attribute, lsp_clients, _)
     ->  send(M, setup_styles)
     ;   get(M, text_buffer, Buffer),
-        lsp_event(opened(Buffer)),
+        broadcast(pce_emacs(opened(Buffer))),
         send(M, setup_styles),
         % needs to be called in next event cycle
         new(T, timer(0.1,
@@ -563,27 +464,4 @@ completion(Target, Dict, Completion) :-
     Completion = Dict.get(insertText),
     sub_string(Completion, 0, _, _, Target).
 
-
 :- emacs_end_mode.
-
-
-                /*******************************
-                *             UTIL             *
-                *******************************/
-
-%!  for_sheet(+Sheet, :Action) is semidet.
-%
-%   Call call(Action, Name, Value) for each attribute in Sheet.
-
-for_sheet(Sheet, Action) :-
-    get(Sheet, '_arity', Count),
-    for_sheet_loop(1, Count, Sheet, Action).
-
-for_sheet_loop(I, Count, Sheet, Action) :-
-    I =< Count,
-    !,
-    get(Sheet, '_arg', I, attribute(Name, Value)),
-    once(call(Action, Name, Value)),
-    I2 is I+1,
-    for_sheet_loop(I2, Count, Sheet, Action).
-for_sheet_loop(_I, _Count, _Sheet, _Action).

@@ -48,6 +48,24 @@
 
 :- use_module(lsp_registry).
 
+:- meta_predicate
+    for_sheet(+, 2).
+
+:- initialization
+    listen(pce_emacs(Event), lsp_event(Event)).
+
+/** <module> Basic LSP connection for PceEmacs
+
+This module defines the basic interaction between PceEmacs and
+LSP servers. It provides:
+
+  - The classes `lsp_workspace` and `lsp_client`
+  - Hooks into `emacs_buffer` to attach zero or more LSP clients
+    to a newly opened buffer.
+  - Keep the LSPs in sync on changes as well as closing the buffer.
+
+*/
+
 %!  lsp_token_type(+LSP, ?TokenTypeNum, ?TokenTypeName)
 
 lsp_token_type(LSP, TokenTypeNum, TokenTypeName) :-
@@ -469,3 +487,117 @@ delay(Time, Goal) :-
                  and(message(@prolog, call, prolog(Goal)),
                      message(@receiver, free)))),
     send(T, start, once).
+
+
+                /*******************************
+                *           CONNECT            *
+                *******************************/
+
+:- discontiguous
+    lsp_event/1.
+
+lsp_event(opened(Buffer)) :-
+    get(Buffer, mode, Mode),
+    get(Buffer, file, File),
+    File \== @nil,
+    get(File, path, Path),
+    ensure_lsp_server(Buffer, Path, Mode, Clients),
+    uri_file_name(URI, Path),
+    debug(lsp(file), 'Opened ~p', [URI]),
+    get(Buffer, contents, string(Content)),
+    send(Buffer, attribute, lsp_version, 1),
+    send(Buffer, attribute, lsp_tracking, URI),
+    send(Buffer, lsp_changes, @on),
+    for_sheet(Clients,
+              document_open(URI, Content)).
+
+document_open(URI, Content, _Id, LSP) :-
+    send(LSP, notify,
+         'textDocument/didOpen'(
+             #{textDocument:
+                 #{ uri: URI,
+                    languageId: "c",
+                    version: 1,
+                    text: Content
+                  }
+              })).
+
+lsp_event(closed(Buffer)) :-
+    get(Buffer, attribute, lsp_tracking, URI),
+    debug(lsp(file), 'Closed ~p', [URI]),
+    get(Buffer, attribute, lsp_clients, Clients),
+    for_sheet(Clients,
+              document_close(URI)).
+
+document_close(URI, _Id, LSP) :-
+    send(LSP, notify,
+         'textDocument/didClose'(
+             #{textDocument:
+                 #{ uri: URI
+                  }
+              })).
+
+lsp_event(changed(Buffer)) :-
+    get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, attribute, lsp_clients, Clients),
+    get(Buffer, lsp_changes, Changes),
+    get(Buffer, attribute, lsp_version, Version0),
+    Version is Version0+1,
+    send(Buffer, attribute, lsp_version, Version),
+    (   Changes == @nil
+    ->  get(Buffer, contents, string(Content)),
+        JSONChanges = [ #{text: Content} ],
+        debug(lsp(changes), 'Sending whole buffer for ~p', [Buffer]),
+        send(Buffer, lsp_changes, @on)      % re-enable incremental
+    ;   chain_list(Changes, ChangeList),
+        maplist(to_json, ChangeList, JSONChanges),
+        debug(lsp(changes), '~p: changes: ~@',
+              [ Buffer,
+                print_term(JSONChanges, [output(current_output)])
+              ])
+    ),
+    for_sheet(Clients, document_changed(URI, Version, JSONChanges)).
+
+document_changed(URI, Version, JSONChanges, _Id, LSP) :-
+    send(LSP, notify,
+         'textDocument/didChange'(
+             #{ textDocument:
+                  #{ uri: URI,
+                     version: Version
+                   },
+                contentChanges: JSONChanges
+              })).
+
+to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
+                             end: #{line: EL, character: EP}
+                           },
+                   rangeLength: ULen,
+                   text: Text
+                 }) :-
+    object(Change, text_change(SL, SP, EL, EP, TextObj)),
+    get(Change, length, ULen),
+    (   TextObj == @nil
+    ->  Text = ""
+    ;   object(TextObj, string(Text))
+    ).
+
+                /*******************************
+                *             UTIL             *
+                *******************************/
+
+%!  for_sheet(+Sheet, :Action) is semidet.
+%
+%   Call call(Action, Name, Value) for each attribute in Sheet.
+
+for_sheet(Sheet, Action) :-
+    get(Sheet, '_arity', Count),
+    for_sheet_loop(1, Count, Sheet, Action).
+
+for_sheet_loop(I, Count, Sheet, Action) :-
+    I =< Count,
+    !,
+    get(Sheet, '_arg', I, attribute(Name, Value)),
+    once(call(Action, Name, Value)),
+    I2 is I+1,
+    for_sheet_loop(I2, Count, Sheet, Action).
+for_sheet_loop(_I, _Count, _Sheet, _Action).
