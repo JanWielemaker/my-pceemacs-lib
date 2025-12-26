@@ -582,6 +582,65 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
     ).
 
                 /*******************************
+                *     EXTEND EMACS BUFFER      *
+                *******************************/
+
+:- emacs_extend_mode(language,
+                     []).
+
+class_variable(lsp_roles, sheet*, @nil,
+               "Mapping from role to LSP id").
+
+:- pce_group(lsp).
+
+lsp_from_role(M, Role:name, LSPId:name) :<-
+    "Get LSP id that serves some role"::
+    get(M, class_variable_value, lsp_roles, Sheet),
+    Sheet \== @nil,
+    get(Sheet, value, Role, LSPId).
+
+%   <-lsp_client
+%
+%   Find the LSP client to implement a specific role for this mode.
+
+lsp_client(M, Role:[name], LSP:lsp_client) :<-
+    "Get LSP client in some role for this buffer"::
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_clients, Clients),
+    (   Role == @default
+    ->  get(Clients, '_arg', 1, attribute(_Role, LSP))
+    ;   get(M, lsp_from_role, Role, LSPId),
+        get(Clients, value, LSPId, LSP)
+    ).
+
+lsp_position(M, For:for=[int], Pos:prolog) :<-
+    "Get LSP compatible position"::
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, URI),
+    (   For == @default
+    ->  get(M, caret, Offset)
+    ;   Offset = For
+    ),
+    get(TB, line_number, Offset, Line1),
+    Line is Line1 - 1,
+    get(TB, lsp_column, Offset, Col),
+    Pos = #{ textDocument: #{ uri: URI },
+             position: #{line:Line, character:Col}
+           }.
+
+on_symbol(M) :->
+    "True if caret is on a symbol"::
+    get(M, caret, Caret),
+    (   Pos = Caret
+    ;   Pos is Caret - 1
+    ),
+    get(M, character, Pos, Char),
+    char_type(Char, alnum),
+    !.
+
+:- emacs_end_mode.
+
+                /*******************************
                 *             UTIL             *
                 *******************************/
 

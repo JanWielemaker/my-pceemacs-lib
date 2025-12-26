@@ -193,7 +193,6 @@ step_count(Severity, State) :-
     C is C0+1,
     nb_setarg(Severity, State, C).
 
-
 :- pce_end_class.
 
 

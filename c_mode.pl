@@ -236,12 +236,10 @@ format(Fmt, Args, Head, Tail) :-
 
 class_variable(auto_colourise_size_limit, int, 400000).
 class_variable(idle_timeout,              num, 0.3).
-
-%!  role(+Role, -LSPId)
-
-role(highlight, clangd).
-role(symbol,    clangd).
-role(complete,  clangd).
+class_variable(lsp_roles,		  sheet*,
+               sheet(attribute(highlight, clangd),
+                     attribute(symbol,    clangd),
+                     attribute(complete,  clangd))).
 
 setup_mode(M) :->
     "Setup LSP based C mode"::
@@ -303,44 +301,10 @@ adjust_style(keyword, M, TB, From, Len, Style) =>
 adjust_style(Style0, _M, _TB, _From, _Len, Style) =>
     Style = Style0.
 
-%   <-lsp_client
-%
-%   Find the LSP client to implement a specific role for this mode.
 
-lsp_client(M, Role:[name], LSP:lsp_client) :<-
-    "Get the LSP server for this mode"::
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_clients, Clients),
-    (   Role == @default
-    ->  get(Clients, '_arg', 1, attribute(_Role, LSP))
-    ;   role(Role, LSPId),
-        get(Clients, value, LSPId, LSP)
-    ).
-
-lsp_position(M, For:[int], Pos:prolog) :<-
-    "Get LSP compatible position"::
-    get(M, text_buffer, TB),
-    get(TB, attribute, lsp_tracking, URI),
-    (   For == @default
-    ->  get(M, caret, Offset)
-    ;   Offset = For
-    ),
-    get(TB, line_number, Offset, Line1),
-    Line is Line1 - 1,
-    get(TB, lsp_column, Offset, Col),
-    Pos = #{ textDocument: #{ uri: URI },
-             position: #{line:Line, character:Col}
-           }.
-
-on_symbol(M) :->
-    "True if caret is on a symbol"::
-    get(M, caret, Caret),
-    (   Pos = Caret
-    ;   Pos is Caret - 1
-    ),
-    get(M, character, Pos, Char),
-    char_type(Char, alnum),
-    !.
+                /*******************************
+                *      CROSS-REFERENCING       *
+                *******************************/
 
 find_definition(M) :->
     "LSP based find definition"::
