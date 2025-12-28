@@ -593,11 +593,14 @@ class_variable(lsp_roles, sheet*, @nil,
 
 :- pce_group(lsp).
 
-lsp_from_role(M, Role:name, LSPId:name) :<-
+lsp_from_role(M, Role:[name], LSPId:name) :<-
     "Get LSP id that serves some role"::
     get(M, class_variable_value, lsp_roles, Sheet),
     Sheet \== @nil,
-    get(Sheet, value, Role, LSPId).
+    (   Role == @default
+    ->  get(Sheet, '_arg', 1, attribute(_Role, LSPId))
+    ;   get(Sheet, value, Role, LSPId)
+    ).
 
 %   <-lsp_client
 %

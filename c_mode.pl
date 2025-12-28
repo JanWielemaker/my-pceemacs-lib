@@ -119,7 +119,7 @@ class_variable(lsp_roles,		  sheet*,
 setup_mode(M) :->
     "Setup LSP based C mode"::
     send_super(M, setup_mode),
-    send(M, lsp_setup_highlight).
+    ignore(send(M, lsp_setup_highlight)).
 
 %   ->colourise_buffer_no_lsp
 %
