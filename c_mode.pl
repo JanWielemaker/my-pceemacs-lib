@@ -60,6 +60,18 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
+
+                /*******************************
+                *        DEFINE STYLES         *
+                *******************************/
+
+%!  emacs_c_mode:style(?Term, -StyleAttributes).
+%!  emacs_c_mode:def_style(?Term, -StyleAttributes).
+%
+%   True when a fragment classified by Term  must be displayed using the
+%   given attributes. The style definition for  a given mode are defined
+%   in the module ``emacs_<mode>_mode``.
+
 :- multifile
     emacs_c_mode:style/2.
 
