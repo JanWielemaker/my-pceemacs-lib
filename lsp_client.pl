@@ -593,6 +593,21 @@ class_variable(lsp_roles, sheet*, @nil,
 
 :- pce_group(lsp).
 
+%   ->lsp_setup()
+%
+%   Connect to an LSP if possible. Fails  if   no  LSP  can be found. If
+%   `role` is @default, try to connect to any LSP.
+
+lsp_setup(M, Role:role=[name]) :->
+    "Connect to LSP servers"::
+    get(M, lsp_from_role, Role, _LSPId),
+    (   get(M, lsp_client, Role, _LSP)
+    ->  true
+    ;   get(M, text_buffer, Buffer),
+        broadcast(pce_emacs(opened(Buffer))),
+        get(M, lsp_client, Role, _LSP)
+    ).
+
 lsp_from_role(M, Role:[name], LSPId:name) :<-
     "Get LSP id that serves some role"::
     get(M, class_variable_value, lsp_roles, Sheet),
