@@ -34,13 +34,10 @@
 :- use_module(library(pce)).
 :- use_module(library(emacs_extend), []).
 :- use_module(library(uri)).
-:- use_module(library(broadcast)).
-:- use_module(library(debug)).
 :- use_module(library(apply)).
 :- use_module(library(pce_util)).
 :- use_module(library(lists)).
 
-:- use_module(lsp_client).
 :- use_module(lsp_highlight).
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_symbol_item).
@@ -110,18 +107,7 @@ class_variable(lsp_roles,		  sheet*,
 setup_mode(M) :->
     "Setup LSP based C mode"::
     send_super(M, setup_mode),
-    (   get(M, attribute, lsp_clients, _)
-    ->  send(M, setup_styles)
-    ;   get(M, text_buffer, Buffer),
-        broadcast(pce_emacs(opened(Buffer))),
-        send(M, setup_styles),
-        % needs to be called in next event cycle
-        new(T, timer(0.1,
-                     and(message(M, colourise_buffer),
-                         message(@receiver, free)))),
-        send(T, start, once),
-        send(T, lock_object, @on)
-    ).
+    send(M, lsp_setup_highlight).
 
 %   ->colourise_buffer_no_lsp
 %

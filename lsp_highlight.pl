@@ -33,6 +33,9 @@
 :- module(lsp_highlight,
           []).
 :- use_module(library(pce)).
+:- use_module(library(apply)).
+:- use_module(library(broadcast)).
+:- use_module(library(debug)).
 
 :- use_module(lsp_client).
 
@@ -114,6 +117,33 @@ highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
                 *******************************/
 
 :- emacs_extend_mode(language, []).
+
+%   ->lsp_setup_highlight()
+%
+%   Prepare the editor for LSP based highligting.  This serves two
+%   roles:
+%
+%     - Possibly connect to LSP servers
+%     - Initialise the style mapping for highlighting tokens.
+
+lsp_setup_highlight(M) :->
+    "Prepare using an LSP on this mode"::
+    (   get(M, lsp_from_role, highlight, _LSPId)
+    ->  (   get(M, lsp_client, highlight, _)
+        ->  send(M, setup_styles)
+        ;   get(M, text_buffer, Buffer),
+            broadcast(pce_emacs(opened(Buffer))),
+            get(M, lsp_client, highlight, _)
+        ->  send(M, setup_styles),
+            % needs to be called in next event cycle
+            new(T, timer(0.1,
+                         and(message(M, colourise_buffer),
+                             message(@receiver, free)))),
+            send(T, start, once),
+            send(T, lock_object, @on)
+        ;   true
+        )
+    ).
 
 setup_styles(M) :->
     "Initialize the editor style sheet"::
