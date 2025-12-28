@@ -297,6 +297,10 @@ init(LSP) :->
                rootUri: URI
              }),
         Result),
+    (   debugging(lsp(capabilities))
+    ->  print_term(Result, [nl(true)])
+    ;   true
+    ),
     clean_capabilities(LSP),
     catch_with_backtrace(register_capabilities(LSP, Result.capabilities),
                          E,
@@ -311,7 +315,10 @@ clean_capabilities(LSP) :-
     retractall(token_modifier(LSP,_,_)).
 
 register_capabilities(LSP, Capabilities) :-
-    register_token_types(LSP, Capabilities.semanticTokensProvider.legend).
+    SemanticTokenProvider = Capabilities.get(semanticTokensProvider),
+    !,
+    register_token_types(LSP, SemanticTokenProvider.legend).
+register_capabilities(_LSP, _Capabilities).
 
 register_token_types(LSP, Legend) :-
     forall(nth0(Id, Legend.tokenTypes, String),

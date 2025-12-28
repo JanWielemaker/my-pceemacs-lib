@@ -1,7 +1,11 @@
 :- module(my_latex_mode,
           []).
 :- use_module(library(pce)).
+:- use_module(library(debug)).
+
 :- use_module(lsp_diagnostics).
+
+:- debug(lsp(_)).
 
 :- emacs_extend_mode(latex, []).
 

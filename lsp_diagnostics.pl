@@ -42,6 +42,8 @@
 :- use_module(library(lists)).
 :- use_module(library(pce_util)).
 
+:- use_module(lsp_client).
+
 /** <module> Handle LSP disagnostic messages
 
 This  module  provides  the  infrastructucture  to  deal  with  the  LSP
