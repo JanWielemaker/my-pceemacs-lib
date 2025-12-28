@@ -41,6 +41,7 @@
 :- use_module(library(lists)).
 
 :- use_module(lsp_client).
+:- use_module(lsp_highlight).
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_symbol_item).
 
@@ -62,99 +63,13 @@ library should manage multiple LSP servers for multiple modes.
 %:- debug(lsp(edit)).
 %:- set_prolog_flag(debug_message_context, [time,thread]).
 
-%!  lsp_highlight(+TextBuffer, +LSPId) is semidet.
-%
-%   Do LSP based highlighting. Asks  for   the  tokens and applies them.
-%   This seems to work fairly well, even for big files.
+:- multifile
+    emacs_c_mode:style/2.
 
-lsp_highlight(TB, LSP) :-
-    get(TB, attribute, lsp_tracking, URI),
-    send(TB, report, progress, 'LSP highlighting'),
-    get_time(LSPTime0),
-    get(LSP, call,
-        'textDocument/semanticTokens/full'(
-            #{ textDocument:
-                 #{ uri: URI
-                  }
-             }),
-        Result),
-    get_time(LSPTime1),
-    length(Result.data, Len),
-    Tokens is Len//5,
-    LSPTime is LSPTime1-LSPTime0,
-    send(TB, report, progress,
-         'Received %d semantic tokens in %.3f seconds', Tokens, LSPTime),
-    send(TB, for_all_fragments,
-         if(message(@arg1, instance_of, emacs_colour_fragment),
-            message(@arg1, free))),
-    get_time(FragmentTime0),
-    highlight_tokens(Result.data, LSP, TB, 0, 0, 0, 0, Count),
-    get_time(FragmentTime1),
-    FragmentTime is FragmentTime1 - FragmentTime0,
-    send(TB, report, progress,
-         'Created %d fragments in %.3f seconds', Count, FragmentTime),
-    send(TB, report, done).
+emacs_c_mode:def_style(Class, Attributes) :-
+    style(Class, Attributes).
 
-%!  highlight_tokens(+DeltaTokens, +LSP, +Buffer, +StartLine, +StartPos,
-%!                   +Offset, +Count0, -Count) is det.
-%
-%   @bug Offset inside the line is measured   in UTF-16 units by LSP. As
-%   is, we use them as Unicode code points.
-
-highlight_tokens([], _, _, _, _, _, C, C).
-highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
-    (   IL == 0
-    ->  SL = SL0,
-        SP is SP0+IP,
-        Offset is O0+IP
-    ;   SL is SL0+IL,
-        SP = IP,
-        get(TB, scan, O0, line, IL, start, SOL),
-        Offset is SOL+IP
-    ),
-    lsp_token_type(LSP, Tid, TokenType),
-    StyleClass = lsp(TokenType),
-    (   style(StyleClass, _)
-    ->  debug(lsp(token), '~p:~p[~p]@~p: ~p',
-              [SL,SP,Len,Offset,TokenType]),
-        style_name(StyleClass, StyleName),
-        new(F, emacs_c_fragment(TB, Offset, Len, StyleName)),
-        send(F, slot, lsp_client, LSP),
-        send(F, slot, modifiers, Mid),
-        C1 is C0+1
-    ;   C1 = C0
-    ),
-    highlight_tokens(More, LSP, TB, SL, SP, Offset, C1, C).
-
-
-%!  style(?Class, -Name, -Style) is nondet.
-%
-%   Define the styles.
-%
-%   @tbd Create a reusable library from similar  code used by the Prolog
-%   mode  such  that  we  can  reduce    duplication  and  apply  themes
-%   transparently.
-
-style(Class, Name, Style) :-
-    style(Class, Attributes),
-    style_name(Class, Name),
-    maplist(style_attribute, Attributes, PceArgs),
-    (   PceArgs == []
-    ->  Style = @default
-    ;   Style =.. [style|PceArgs]
-    ).
-
-style_attribute(Attr, Name := Value) :-
-    Attr =.. [Name,Value].
-
-:- table style_name/2.
-style_name(Class, Name) :-
-    copy_term(Class, Copy),
-    numbervars(Copy, 0, _, [singletons(true)]),
-    term_string(Copy, S, [numbervars(true)]),
-    atom_string(Name, S).
-
-style(lsp(comment),    [colour(orange)]).              % There is a remark on this
+style(lsp(comment),    [colour(orange)]).              % Inactive code
 style(lsp(variable),   [colour(red4)]).
 style(lsp(parameter),  [colour(red4), underline(true)]).
 style(lsp(function),   [bold(true)]).
@@ -174,55 +89,6 @@ style(operator,        [colour(blue)]).
 
 style(Diagnostic,      Properties) :-
     lsp_diagnostic_style(Diagnostic, Properties).
-
-
-                /*******************************
-                *           FRAGMENT           *
-                *******************************/
-
-:- pce_begin_class(emacs_c_fragment, emacs_colour_fragment,
-                   "Represent an LSP highlight fragment").
-
-variable(lsp_client,	lsp_client*, get, "Source LSP client").
-variable(modifiers,	int := 0,    get, "LSP token type modifiers").
-
-identify(F) :->
-    "Identify LSP fragments"::
-    get(F, style, StyleName),
-    (   get(F, lsp_client, LSP),
-        LSP \== @nil,
-        get(F, modifiers, Mask),
-        Mask \== 0
-    ->  get(LSP, modifiers, Mask, Modifiers)
-    ;   Modifiers = []
-    ),
-    term_string(Style, StyleName),
-    phrase(c_fragment_message(Style, Modifiers), Codes),
-    string_codes(String, Codes),
-    send(F?text_buffer, report, status, '%s', String).
-
-c_fragment_message(Style, Modifiers) -->
-    token_style(Style),
-    token_modifiers(Modifiers).
-
-token_style(lsp(comment)) ==>
-    "Inactive conditional".
-token_style(lsp(Style)) ==>
-    format('C ~w', [Style]).
-token_style(comment) ==>
-    "C comment".
-token_style(Style) ==>
-    format('~p', [Style]).
-
-token_modifiers([]) ==>
-    [].
-token_modifiers(Modifiers) ==>
-    format(' ~p', [Modifiers]).
-
-format(Fmt, Args, Head, Tail) :-
-    format(codes(Head, Tail), Fmt, Args).
-
-:- pce_end_class.
 
 
                 /*******************************
@@ -262,7 +128,8 @@ setup_styles(M) :->
     get(M, editor, E),
     (   get(E, attribute, styles_assigned, @on)
     ->  true
-    ;   forall(style(_Class, Name, Style),
+    ;   get(M, name, ModeName),
+        forall(lsp_highlight:style(ModeName, _Class, Name, Style),
                send(E, style, Name, Style)),
         send(E, attribute, styles_assigned, @on)
     ).
@@ -271,7 +138,7 @@ colourise_buffer(M) :->
     "Use LSP based highlighting"::
     get(M, text_buffer, TB),
     (   get(M, lsp_client, highlight, LSP),
-        lsp_highlight(TB, LSP)
+        send(TB, lsp_highlight, LSP)
     ->  send(M, update_bookmarks)
     ;   send_super(M, colourise_buffer)
     ),
@@ -292,7 +159,7 @@ highlight(M, From:int, Len:int, Style:name) :->
     "Add a highlight fragment"::
     get(M, text_buffer, TB),
     adjust_style(Style, M, TB, From, Len, TheStyle),
-    new(_, emacs_c_fragment(TB, From, Len, TheStyle)).
+    new(_, emacs_lsp_fragment(TB, From, Len, TheStyle)).
 
 adjust_style(keyword, M, TB, From, Len, Style) =>
     get(TB, contents, From, Len, string(KeywordS)),
