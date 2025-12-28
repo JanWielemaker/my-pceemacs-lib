@@ -108,6 +108,40 @@ highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
 
 :- pce_end_class.
 
+
+                /*******************************
+                *       MODE EXTENSIONS        *
+                *******************************/
+
+:- emacs_extend_mode(language, []).
+
+setup_styles(M) :->
+    "Initialize the editor style sheet"::
+    get(M, editor, E),
+    (   get(E, attribute, styles_assigned, @on)
+    ->  true
+    ;   get(M, name, ModeName),
+        forall(style(ModeName, _Class, Name, Style),
+               send(E, style, Name, Style)),
+        send(E, attribute, styles_assigned, @on)
+    ).
+
+colourise_buffer(M) :->
+    "Use LSP based highlighting"::
+    get(M, text_buffer, TB),
+    (   get(M, lsp_client, highlight, LSP),
+        send(TB, lsp_highlight, LSP)
+    ->  send(M, update_bookmarks)
+    ;   send_super(M, colourise_buffer)
+    ),
+    (   send(M, has_send_method, colourise_buffer_no_lsp)
+    ->  send(M, colourise_buffer_no_lsp)
+    ;   true
+    ).
+
+:- emacs_end_mode.
+
+
 %!  style(+Mode, ?Class, -Name, -Style) is nondet.
 %
 %   Define the styles.

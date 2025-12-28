@@ -123,33 +123,12 @@ setup_mode(M) :->
         send(T, lock_object, @on)
     ).
 
-setup_styles(M) :->
-    "Initialize the editor style sheet"::
-    get(M, editor, E),
-    (   get(E, attribute, styles_assigned, @on)
-    ->  true
-    ;   get(M, name, ModeName),
-        forall(lsp_highlight:style(ModeName, _Class, Name, Style),
-               send(E, style, Name, Style)),
-        send(E, attribute, styles_assigned, @on)
-    ).
-
-colourise_buffer(M) :->
-    "Use LSP based highlighting"::
-    get(M, text_buffer, TB),
-    (   get(M, lsp_client, highlight, LSP),
-        send(TB, lsp_highlight, LSP)
-    ->  send(M, update_bookmarks)
-    ;   send_super(M, colourise_buffer)
-    ),
-    send(M, highlight_c).
-
-%   ->highlight_c
+%   ->colourise_buffer_no_lsp
 %
 %   Perform basic C syntax highlighting.  This deals with comments
 %   and C keyboards
 
-highlight_c(M) :->
+colourise_buffer_no_lsp(M) :->
     "Basic C syntax highlighting"::
     get(M, text_buffer, TB),
     send(TB, for_all_syntax,
