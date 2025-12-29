@@ -4,6 +4,7 @@
 :- use_module(library(debug)).
 
 :- use_module(lsp_diagnostics).
+:- use_module(lsp_highlight).
 
 :- debug(lsp(_)).
 :- debug(json_rpc(_)).
@@ -37,7 +38,7 @@ class_variable(lsp_roles,		  sheet*,
 setup_mode(M) :->
      "Setup LSP based LaTeX mode"::
     send_super(M, setup_mode),
-    ignore(send(M, lsp_setup)).
+    ignore(send(M, lsp_setup_highlight)).
 
 :- emacs_end_mode.
 

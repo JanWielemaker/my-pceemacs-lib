@@ -128,10 +128,12 @@ highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
 
 lsp_setup_highlight(M) :->
     "Prepare using an LSP on this mode"::
-    (   get(M, lsp_client, highlight, _)
+    (   styled_role(Role),
+        get(M, lsp_client, Role, _)
     ->  send(M, setup_styles)
     ;   send(M, lsp_setup),
-        get(M, lsp_client, highlight, _),
+        styled_role(Role),
+        get(M, lsp_client, Role, _),
         send(M, setup_styles),
         % needs to be called in next event cycle
         new(T, timer(0.1,
@@ -140,6 +142,9 @@ lsp_setup_highlight(M) :->
         send(T, start, once),
         send(T, lock_object, @on)
     ).
+
+styled_role(highlight).
+styled_role(diagnostics).
 
 setup_styles(M) :->
     "Initialize the editor style sheet"::

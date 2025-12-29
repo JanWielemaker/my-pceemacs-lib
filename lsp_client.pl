@@ -320,13 +320,16 @@ init(LSP) :->
 
 :- dynamic
     token_type/3,                         % LSP, TypeId, TypeName
-    token_modifier/3.                     % LSP, ModId,  ModName
+    token_modifier/3,                     % LSP, ModId,  ModName
+    capabilities/2.                       % LSP, Dict
 
 clean_capabilities(LSP) :-
     retractall(token_type(LSP,_,_)),
-    retractall(token_modifier(LSP,_,_)).
+    retractall(token_modifier(LSP,_,_)),
+    retractall(capabilities(LSP, _)).
 
 register_capabilities(LSP, Capabilities) :-
+    asserta(capabilities(LSP, Capabilities)),
     SemanticTokenProvider = Capabilities.get(semanticTokensProvider),
     !,
     register_token_types(LSP, SemanticTokenProvider.legend).
@@ -362,21 +365,31 @@ token_mask_modifiers(LSP, Mask, ModID, List) :-
     ;   token_mask_modifiers(LSP, Mask,  ModID1, List)
     ).
 
+code_action_kinds(LSP, Kinds:prolog) :<-
+    "Get supported codeActionKinds as a list"::
+    capabilities(LSP, Dict),
+    Provider = Dict.get(capabilities).get(codeActionProvider),
+    is_dict(Provider),
+    Kinds = Provider.get(codeActionKinds).
+
 %   ->lsp_execute_command(+Command) is det.
 %
 %   Send a request to execute Command. While  this is a JSON RPC request
 %   and must have an `id`, it is  normally not answered. The async(true)
 %   option ensures we are not waiting for a response.
 
-execute_command(LSP, Command:prolog) :->
+execute_command(LSP, Command:command=prolog, Arguments:arguments=prolog) :->
     "Execute a command on the workspace"::
-    get(LSP, call,
-        'workspace/executeCommand'(
-            #{ command: Command.command,
-               arguments: Command.arguments
-             }),
-        [async(true)],
-        _NoReply).
+    (   Command == "pce_emacs.edit"
+    ->  execute_edit(Arguments)
+    ;   get(LSP, call,
+            'workspace/executeCommand'(
+                #{ command: Command,
+                   arguments: Arguments
+                 }),
+            [async(true)],
+            _NoReply)
+    ).
 
 :- pce_end_class(lsp_client).
 

@@ -241,11 +241,16 @@ fixes(F, Fixes:prolog) :<-
     get(Buffer, attribute, lsp_tracking, URI),
     get(F, json, Diagnostic),
     get(F, lsp_client, LSP),
+    Context0 = #{ diagnostics: [Diagnostic] },
+    (   get(LSP, code_action_kinds, Kinds)
+    ->  Context = Context0.put(only, Kinds)
+    ;   Context = Context0
+    ),
     get(LSP, call,
         'textDocument/codeAction'(
             #{ textDocument: #{ uri: URI},
                range: Diagnostic.range,
-               context: #{ diagnostics: [Diagnostic] }
+               context: Context
              }),
         Fixes).
 
@@ -336,9 +341,11 @@ fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     ;   true
     ).
 
-append_fix_button(W, Fix) :-
-    #{ arguments: _Args, title: Title } :< Fix,
-    fix_icon(Fix.command, Icon),
+append_fix_button(W, Fix),
+    fix_command(Fix, Title, Command, _Args, Kind) =>
+    debug(lsp(fix), "Fix: ~@",
+          [print_term(Fix, [output(current_output)])]),
+    fix_icon(Command, Kind, Icon),
     get(W, member, message, Group),
     send(Group, append,
          new(LBL, label(icon, image(Icon))),
@@ -349,10 +356,43 @@ append_fix_button(W, Fix) :-
     send(LBL, width, 32),
     send(LBL, reference, point(0, B?reference?y)),
     send(B, alignment, left).
+append_fix_button(_W, Fix) =>
+    debug(lsp(unknown_fix), "Unknown fix: ~@",
+          [print_term(Fix, [output(current_output)])]).
 
-fix_icon("clangd.applyTweak", '64x64/lsp-apply-tweak.png') :- !.
-fix_icon("clangd.applyFix",   '64x64/lsp-apply-fix.png')   :- !.
-fix_icon(_,                   '64x64/lsp-apply-fix.png').
+%!  fix_command(+CodeAction, -Title, -Command, -Args, -Kind) is semidet.
+%
+%   If  the  command  is  an  immediate  edit,  Command  is  unified  to
+%   `"pce_emacs.edit"`.
+
+fix_command(Fix, Title, Command, Args, Kind),
+    #{ command: CommandDict, title: Title } :< Fix,
+    is_dict(CommandDict),
+    #{ command: Command, arguments: Args } :< CommandDict =>
+    Kind = Fix.get(kind, "unknown").
+fix_command(Fix, Title, Command, Edits, Kind),
+    #{ edit: Edit, title: Title } :< Fix,
+    is_dict(Edit),
+    #{ documentChanges: Edits } :< Edit =>
+    Command = "pce_emacs.edit",
+    Kind = Fix.get(kind, "unknown").
+
+fix_command(Fix, Title, Command, Args, Kind),
+    #{ command: Command, arguments: Args, title: Title } :< Fix =>
+    Kind = Fix.get(kind, "unknown").
+fix_command(_Fix, _Title, _Command, _Args, _Kind) =>
+    fail.
+
+
+%!  fix_icon(+Command:string, +Kind:string, -Icon) is det.
+
+fix_icon("clangd.applyTweak", _, '64x64/lsp-apply-tweak.png') :- !.
+fix_icon("clangd.applyFix",   _, '64x64/lsp-apply-fix.png')   :- !.
+fix_icon(_,                   _, '64x64/lsp-apply-fix.png').
+
+%   ->apply_change(+Title)
+%
+%   Apply the selected code action
 
 apply_change(W, TitleObj:string) :->
     "Apply a selected change"::
@@ -360,11 +400,11 @@ apply_change(W, TitleObj:string) :->
     object(TitleObj, string(TitleAtom)),
     atom_string(TitleAtom, Title),
     (   member(Fix, Fixes),
-        #{title:Title} :< Fix
+        fix_command(Fix, Title, Command, Args, _Kind)
     ->  true
     ),
     get(W, lsp_client, LSP),
     send(W, destroy),
-    send(LSP, execute_command, Fix).
+    send(LSP, execute_command, Command, Args).
 
 :- pce_end_class.
