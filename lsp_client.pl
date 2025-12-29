@@ -574,14 +574,14 @@ lsp_event(opened(Buffer)) :-
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
     for_sheet(Clients,
-              document_open(URI, Content)).
+              document_open(Mode, URI, Content)).
 
-document_open(URI, Content, _Id, LSP) :-
+document_open(Mode, URI, Content, _Id, LSP) :-
     send(LSP, notify,
          'textDocument/didOpen'(
              #{textDocument:
                  #{ uri: URI,
-                    languageId: "c",
+                    languageId: Mode,
                     version: 1,
                     text: Content
                   }
