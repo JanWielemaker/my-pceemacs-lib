@@ -145,9 +145,12 @@ lsp_clients(WS, Mode:name, Clients:sheet) :<-
     (   get(Sheet, value, Mode, Clients)
     ->  true
     ;   new(Clients, sheet),
-        lsp_create_client(WS, Mode, Id, Client),
-        send(Clients, value, Id, Client),
-        send(Sheet, value, Mode, Clients)
+        (   lsp_create_client(WS, Mode, Id, Client),
+            send(Clients, value, Id, Client),
+            send(Sheet, value, Mode, Clients),
+            fail
+        ;   true
+        )
     ).
 
 lsp_create_client(WS, Mode, Id, LSP) :-
