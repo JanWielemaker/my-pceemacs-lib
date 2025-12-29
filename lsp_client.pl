@@ -559,8 +559,12 @@ apply_buffer_changes_(Buffer, Changes) :-
     sort(offset, >=, Descriptions, Ordered),
     maplist(apply_change(Buffer), Ordered),
     send(Buffer, mark_undo),
-    broadcast(pce_emacs(changed(Buffer))).
-%   delay(0.1, lsp_highlight(Buffer)).
+    broadcast(pce_emacs(changed(Buffer))),
+    new(T, timer(0.1,
+                 and(message(Buffer, auto_colourise),
+                     message(@receiver, free)))),
+    send(T, start, once),
+    send(T, lock_object, @on).
 
 change_description(Buffer, Change,
                    #{offset: StartOffset, length: Length, text:String}) :-
@@ -578,15 +582,6 @@ apply_change(Buffer, #{offset: Start, length: Length, text:String}) :-
 
 lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
     get(Buffer, lsp_offset, Line, Char, Offset).
-
-:- meta_predicate
-    delay(+, 0).
-
-delay(Time, Goal) :-
-    new(T, timer(Time,
-                 and(message(@prolog, call, prolog(Goal)),
-                     message(@receiver, free)))),
-    send(T, start, once).
 
 %!  'window/workDoneProgress/create'(+Data, -Reply) is det.
 %

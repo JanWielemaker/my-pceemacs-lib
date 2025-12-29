@@ -44,6 +44,13 @@
 
 :- pce_extend_class(emacs_buffer).
 
+auto_colourise(TB) :->
+    "Run mode ->auto_colourise_buffer on associated mode"::
+    (   get(TB?editors, head, Editor)
+    ->  send(Editor?mode, auto_colourise_buffer)
+    ;   true
+    ).
+
 %   ->lsp_highlight(+LSP)
 %
 %   Do LSP based highlighting. Asks  for   the  tokens and applies them.
