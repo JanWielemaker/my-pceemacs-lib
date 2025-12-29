@@ -8,6 +8,25 @@
 :- debug(lsp(_)).
 :- debug(json_rpc(_)).
 
+
+                /*******************************
+                *            THEME             *
+                *******************************/
+
+:- multifile
+    emacs_latex_mode:style/2.
+
+emacs_latex_mode:def_style(Class, Attributes) :-
+    style(Class, Attributes).
+
+style(Diagnostic,      Properties) :-
+    lsp_diagnostic_style(Diagnostic, Properties).
+
+
+                /*******************************
+                *             MODE             *
+                *******************************/
+
 :- emacs_extend_mode(latex, []).
 
 class_variable(auto_colourise_size_limit, int, 400000).
