@@ -378,14 +378,14 @@ code_action_kinds(LSP, Kinds:prolog) :<-
 %   and must have an `id`, it is  normally not answered. The async(true)
 %   option ensures we are not waiting for a response.
 
-execute_command(LSP, Command:command=prolog, Arguments:arguments=prolog) :->
+execute_command(LSP, Command:command=prolog, Args:arguments=prolog) :->
     "Execute a command on the workspace"::
     (   Command == "pce_emacs.edit"
-    ->  execute_edit(Arguments)
+    ->  lsp_apply_edits(Args)
     ;   get(LSP, call,
             'workspace/executeCommand'(
                 #{ command: Command,
-                   arguments: Arguments
+                   arguments: Args
                  }),
             [async(true)],
             _NoReply)
@@ -483,7 +483,7 @@ lsp_ws_configuration(_, #{}).
     ->  pp(Data)
     ;   true
     ),
-    (   catch(apply_edits(Data), Error, true)
+    (   catch(lsp_apply_edits(Data), Error, true)
     ->  (   var(Error)
         ->  Result = #{applied: true}
         ;   message_to_string(Error, Msg),
@@ -496,9 +496,45 @@ lsp_ws_configuration(_, #{}).
                   }
     ).
 
-apply_edits(Data) :-
-    dict_pairs(Data.edit.changes, _, Pairs),
-    maplist(apply_edit, Pairs).
+%!  lsp_apply_edits(+Data)
+%
+%   Apply a set of edits.  Data comes in various formats.
+%
+%     - clangd
+%       Sends a dict mapping URIs to change sets for that the specified
+%       file.
+%     - ltex-ls
+%       A list of #{edits: ChangeSet,
+%                   textDocument: #{uri: URI, version: Version}}
+
+lsp_apply_edits(Data),
+    is_dict(Data),
+    dict_pairs(Data.get(edit).get(changes), _, Pairs),
+    maplist(file_change_set, Pairs, ChangePairs) =>
+    maplist(apply_edit, ChangePairs).
+lsp_apply_edits(Data),
+    is_list(Data),
+    maplist(file_change_set, Data, ChangePairs) =>
+    maplist(apply_edit, ChangePairs).
+
+file_change_set(URI-ChangeSet, URI-ChangeSet) :-
+    uri_is_global(URI), is_list(ChangeSet),
+    maplist(is_change, ChangeSet),
+    !.
+file_change_set(Dict, URI-ChangeSet) :-
+    is_dict(Dict),
+    #{ edits: ChangeSet, textDocument: Document } :< Dict,
+    is_dict(Document),
+    #{ uri: URI} :< Document.
+
+is_change(Change) :-
+    is_dict(Change),
+    #{ newText: _, range: Range } :< Change,
+    #{ start:_, end:_ } :< Range.
+
+%!  apply_edit(+Pair) is det.
+%
+%   Pair is `URI-ChangeSet`, representing the changes for URI.
 
 apply_edit(FileURI-Changes) :-
     uri_buffer(FileURI, Buffer),
