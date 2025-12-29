@@ -312,9 +312,11 @@ init(LSP) :->
     ;   true
     ),
     clean_capabilities(LSP),
-    catch_with_backtrace(register_capabilities(LSP, Result.capabilities),
-                         E,
-                         print_message(error, E)).
+    catch_with_backtrace(
+        register_capabilities(LSP, Result.capabilities),
+        E,
+        print_message(error, E)),
+    send(LSP, notify, initialized(#{})).
 
 :- dynamic
     token_type/3,                         % LSP, TypeId, TypeName
@@ -389,6 +391,11 @@ execute_command(LSP, Command:prolog) :->
              #{ diagnostics: true
               }
          }),
+    'workspace/configuration'(
+        #{ parameters:
+             #{ items: true
+              }
+         }) : true,
     'workspace/applyEdit'(
         #{ parameters:
              #{ edit: true
@@ -436,6 +443,23 @@ uri_buffer(URIs, Buffer) :-
     !,
     send(Buffer, lsp_publish_diagnostics, LSP, Diagnostics).
 'textDocument/publishDiagnostics'(_).
+
+%!  'workspace/configuration'(+Data, -Result) is det.
+%
+%   Perform dynamic workspace configuration. Data  is   a  list  of JSON
+%   objects holding a `section` key. We must   return  a list of objects
+%   for each configuration  section.  For   unknown  sections  we return
+%   `#{}`.
+%
+%   @tbd Must be implemented by the mode
+
+'workspace/configuration'(Data, Result) :-
+    debug(lsp(workspace),
+          'workspace/configuration(~@)',
+          [print_term(Data, [output(current_output)])]),
+    maplist(lsp_ws_configuration, Data.items, Result).
+
+lsp_ws_configuration(_, #{}).
 
 %!  'workspace/applyEdit'(+Data, -Result) is det.
 %

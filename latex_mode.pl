@@ -6,6 +6,7 @@
 :- use_module(lsp_diagnostics).
 
 :- debug(lsp(_)).
+:- debug(json_rpc(_)).
 
 :- emacs_extend_mode(latex, []).
 
