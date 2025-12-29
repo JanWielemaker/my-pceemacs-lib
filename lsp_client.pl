@@ -279,11 +279,17 @@ init(LSP) :->
     "Initialize the LSP connection for a directory"::
     get(LSP?workspace?root, path, Dir),
     uri_file_name(URI, Dir),
+    current_prolog_flag(pid, PID),
     get(LSP, call,
         initialize(
             #{ capabilities:
-                 #{ textDocument:
-                      #{ semanticTokens:
+                 #{ workspace:
+                      #{ configuration: true
+                       },
+                    textDocument:
+                      #{ publishDiagnostics:
+                           #{},
+                         semanticTokens:
                            #{ dynamicRegistration: false,
                               requests:
                                 #{ full: true,
@@ -292,9 +298,13 @@ init(LSP) :->
                             },
                          tokenTypes: [],
                          tokenModifiers: []
+                       },
+                    window:
+                      #{ workDoneProgress: true
                        }
                   },
-               rootUri: URI
+               rootUri: URI,
+               processId: PID
              }),
         Result),
     (   debugging(lsp(capabilities))
@@ -376,14 +386,24 @@ execute_command(LSP, Command:prolog) :->
 :- json_method
     'textDocument/publishDiagnostics'(
         #{ parameters:
-           #{ diagnostics: true
-            }
+             #{ diagnostics: true
+              }
          }),
     'workspace/applyEdit'(
         #{ parameters:
-           #{ edit: true
-            }
-         }) : true.
+             #{ edit: true
+              }
+         }) : true,
+    'window/workDoneProgress/create'(
+        #{ parameters:
+             #{ token: true
+              }
+         }) : true,
+    '$/progress'(
+        #{ parameters:
+             #{}
+         }).
+
 
 %!  lsp_calling(-LSP) is det.
 %
@@ -495,6 +515,20 @@ delay(Time, Goal) :-
                      message(@receiver, free)))),
     send(T, start, once).
 
+%!  'window/workDoneProgress/create'(+Data, -Reply) is det.
+%
+%   Used by the server to validate we process progress reports.
+
+'window/workDoneProgress/create'(_Data, null).
+
+
+%!  '$/progress'(+Data) is det.
+
+'$/progress'(Data) :-
+    (   debugging(lsp(progress))
+    ->  print_term(Data, [nl(true)])
+    ;   true
+    ).
 
                 /*******************************
                 *           CONNECT            *
