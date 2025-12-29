@@ -57,6 +57,7 @@ auto_colourise(TB) :->
 
 lsp_highlight(TB, LSP:lsp_client) :->
     "Implement LSP based semantic highlighting"::
+    get(LSP, initialized, @on),
     get(TB, attribute, lsp_tracking, URI),
     send(TB, report, progress, 'LSP highlighting'),
     get_time(LSPTime0),

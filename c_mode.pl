@@ -52,6 +52,7 @@ Eventally, part of this should be moved   into  a reusable library. That
 library should manage multiple LSP servers for multiple modes.
 */
 
+%:- debug(lsp(init)).
 %:- debug(lsp(file)).
 %:- debug(lsp(highlight)).
 %:- debug(lsp(project)).

@@ -6,8 +6,8 @@
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_highlight).
 
-:- debug(lsp(_)).
-:- debug(json_rpc(_)).
+% :- debug(lsp(_)).
+% :- debug(json_rpc(_)).
 
 
                 /*******************************

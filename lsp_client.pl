@@ -189,6 +189,8 @@ variable(workspace,	lsp_workspace, get, "Workspace root").
 variable(program,	prolog,	       get, "LSP excutable").
 variable(arguments,	vector,        get, "LSP excutable arguments").
 variable(connection,	prolog*,       get, "The connecting stream").
+variable(initialized,   bool := @off,  get, "LSP is ready").
+variable(pending_open,	chain*,        get, "Pending didOpen()").
 
 initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
            Program:program=prolog, Argv:arguments=[vector]) :->
@@ -309,7 +311,18 @@ init(LSP) :->
                rootUri: URI,
                processId: PID
              }),
-        Result),
+        [ async(initialized(LSP))
+        ],
+        _Reply),
+    debug(lsp(init), 'Sent initialized(~p)', [LSP]).
+
+:- public initialized/2.
+initialized(LSP, Result) :-
+    debug(lsp(init), 'initialized(~p)', [LSP]),
+    send(LSP, initialized, Result).
+
+initialized(LSP, Result:prolog) :->
+    "Call back after LSP is ready"::
     (   debugging(lsp(capabilities))
     ->  print_term(Result, [nl(true)])
     ;   true
@@ -319,7 +332,9 @@ init(LSP) :->
         register_capabilities(LSP, Result.capabilities),
         E,
         print_message(error, E)),
-    send(LSP, notify, initialized(#{})).
+    send(LSP, notify, initialized(#{})),
+    send(LSP, slot, initialized, @on),
+    send(LSP, send_pending).
 
 :- dynamic
     token_type/3,                         % LSP, TypeId, TypeName
@@ -374,6 +389,43 @@ code_action_kinds(LSP, Kinds:prolog) :<-
     Provider = Dict.get(capabilities).get(codeActionProvider),
     is_dict(Provider),
     Kinds = Provider.get(codeActionKinds).
+
+did_open(LSP, Buffer:emacs_buffer) :->
+    "Buffer was opened"::
+    (   get(LSP, initialized, @on)
+    ->  send(LSP, notify_did_open, Buffer)
+    ;   get(LSP, pending_open, Chain),
+        Chain \== @nil
+    ->  send(Chain, append, Buffer)
+    ;   send(LSP, slot, pending_open, chain(Buffer))
+    ).
+
+send_pending(LSP) :->
+    "Send pending didOpen()"::
+    (   get(LSP, pending_open, Chain),
+        Chain \== @nil
+    ->  send(Chain, for_all,
+             message(LSP, notify_did_open, @arg1)),
+        send(LSP, slot, pending_open, @nil)
+    ;   true
+    ).
+
+notify_did_open(LSP, Buffer:emacs_buffer) :->
+    "Send textDocument/didOpen()"::
+    get(Buffer, contents, string(Content)),
+    get(Buffer, attribute, lsp_version, Version),
+    get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, mode, Mode),
+    send(LSP, notify,
+         'textDocument/didOpen'(
+             #{textDocument:
+                 #{ uri: URI,
+                    languageId: Mode,
+                    version: Version,
+                    text: Content
+                  }
+              })).
+
 
 %   ->lsp_execute_command(+Command) is det.
 %
@@ -616,23 +668,14 @@ lsp_event(opened(Buffer)) :-
     ensure_lsp_server(Buffer, Path, Mode, Clients),
     uri_file_name(URI, Path),
     debug(lsp(file), 'Opened ~p', [URI]),
-    get(Buffer, contents, string(Content)),
     send(Buffer, attribute, lsp_version, 1),
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
     for_sheet(Clients,
-              document_open(Mode, URI, Content)).
+              document_open(Buffer)).
 
-document_open(Mode, URI, Content, _Id, LSP) :-
-    send(LSP, notify,
-         'textDocument/didOpen'(
-             #{textDocument:
-                 #{ uri: URI,
-                    languageId: Mode,
-                    version: 1,
-                    text: Content
-                  }
-              })).
+document_open(Buffer, _LSPId, LSP) :-
+    send(LSP, did_open, Buffer).
 
 lsp_event(closed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
