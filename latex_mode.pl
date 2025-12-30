@@ -6,9 +6,9 @@
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_highlight).
 
-% :- debug(lsp(_)).
-% :- debug(json_rpc(_)).
-
+%:- debug(lsp(workspace)).
+:- debug(lsp(_)).
+:- debug(json_rpc(_)).
 
                 /*******************************
                 *            THEME             *
@@ -23,6 +23,32 @@ emacs_latex_mode:def_style(Class, Attributes) :-
 style(Diagnostic,      Properties) :-
     lsp_diagnostic_style(Diagnostic, Properties).
 
+:- multifile
+    emacs_latex_mode:lsp_configuration/2.
+
+emacs_latex_mode:lsp_configuration(Item, Config) :-
+    #{scopeUri: _URI, section: "ltex"} :< Item,
+    Config = #{ latex:
+                  #{ environments:
+                       #{ code: "ignore"
+                        },
+                     commands:
+                       #{ '\\const': "ignore",
+                          '\\program': "ignore",
+                          '\\file': "ignore",
+                          '\\secref': "ignore",
+                          '\\Secref': "ignore",
+                          '\\figref': "ignore",
+                          '\\Figref': "ignore",
+                          '\\cfunction': "ignore",
+                          '\\predicate': "ignore",
+                          '\\cmacro': "ignore",
+                          '\\ctype': "ignore",
+                          '\\arg': "ignore"
+                        }
+                   }
+              }.
+
 
                 /*******************************
                 *             MODE             *
@@ -33,7 +59,7 @@ style(Diagnostic,      Properties) :-
 class_variable(auto_colourise_size_limit, int, 400000).
 class_variable(idle_timeout,              num, 0.3).
 class_variable(lsp_roles,		  sheet*,
-               sheet(attribute(diagnostics, 'ltex-ls'))).
+               sheet(attribute(diagnostics, 'vale-ls'))).
 
 setup_mode(M) :->
      "Setup LSP based LaTeX mode"::

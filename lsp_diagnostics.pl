@@ -372,15 +372,24 @@ fix_command(Fix, Title, Command, Args, Kind),
     Kind = Fix.get(kind, "unknown").
 fix_command(Fix, Title, Command, Edits, Kind),
     #{ edit: Edit, title: Title } :< Fix,
-    is_dict(Edit),
-    #{ documentChanges: Edits } :< Edit =>
+    fix_edits(Edit, Edits) =>
     Command = "pce_emacs.edit",
     Kind = Fix.get(kind, "unknown").
-
 fix_command(Fix, Title, Command, Args, Kind),
     #{ command: Command, arguments: Args, title: Title } :< Fix =>
     Kind = Fix.get(kind, "unknown").
 fix_command(_Fix, _Title, _Command, _Args, _Kind) =>
+    fail.
+
+fix_edits(Dict, Edits),
+    is_dict(Dict),
+    #{ changes: _ } :< Dict =>
+    Edits = Dict.
+fix_edits(Dict, Edits),
+    is_dict(Dict),
+    #{ documentChanges: Edits0 } :< Dict =>
+    Edits = Edits0.
+fix_edits(_, _) =>
     fail.
 
 

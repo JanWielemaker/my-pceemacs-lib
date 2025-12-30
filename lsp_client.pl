@@ -33,7 +33,8 @@
 :- module(lsp_client,
           [ ensure_lsp_server/4,     % +Buffer, +File, +Mode, -Sheet
             lsp_token_type/3,        % +LSP, ?TokenTypeNum, ?TokenTypeName
-            lsp_client/2             % ?LSPClientObj, ?Stream
+            lsp_client/2,            % ?LSPClientObj, ?Stream
+            lsp_mode_module/2
           ]).
 :- use_module(library(pce)).
 :- use_module(library(process)).
@@ -70,6 +71,15 @@ LSP servers. It provides:
 
 lsp_token_type(LSP, TokenTypeNum, TokenTypeName) :-
     token_type(LSP, TokenTypeNum, TokenTypeName).
+
+%!  lsp_mode_module(+Mode, -Module) is det.
+%
+%   True when Module is the Prolog module for dynamic extensions to
+%   mode.
+
+lsp_mode_module(Mode, Module) :-
+    atomic_list_concat([emacs_, Mode, '_mode'], Module).
+
 
                 /*******************************
                 *     CLASS LSP WORKSPACE      *
@@ -160,6 +170,7 @@ lsp_create_client(WS, Mode, Id, LSP) :-
     new(LSP, lsp_client(Id, WS,
                         Config.executable,
                         Config.get(arguments,[]))),
+    send(LSP, mode, Mode),
     send(LSP, start).
 
 :- pce_end_class.
@@ -184,13 +195,14 @@ disconnect_lsps :-
 :- pce_begin_class(lsp_client, object,
                    "Connect to an LSP server").
 
-variable(id,		name,          get, "LSP identifier").
-variable(workspace,	lsp_workspace, get, "Workspace root").
-variable(program,	prolog,	       get, "LSP excutable").
-variable(arguments,	vector,        get, "LSP excutable arguments").
-variable(connection,	prolog*,       get, "The connecting stream").
-variable(initialized,   bool := @off,  get, "LSP is ready").
-variable(pending_open,	chain*,        get, "Pending didOpen()").
+variable(id,		name,          get,  "LSP identifier").
+variable(mode,          name,	       both, "Mode it was created for").
+variable(workspace,	lsp_workspace, get,  "Workspace root").
+variable(program,	prolog,	       get,  "LSP excutable").
+variable(arguments,	vector,        get,  "LSP excutable arguments").
+variable(connection,	prolog*,       get,  "The connecting stream").
+variable(initialized,   bool := @off,  get,  "LSP is ready").
+variable(pending_open,	chain*,        get,  "Pending didOpen()").
 
 initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
            Program:program=prolog, Argv:arguments=[vector]) :->
@@ -293,16 +305,18 @@ init(LSP) :->
                        },
                     textDocument:
                       #{ publishDiagnostics:
-                           #{},
+                           #{ formats: ["plaintext"]
+                            },
                          semanticTokens:
                            #{ dynamicRegistration: false,
                               requests:
                                 #{ full: true,
                                    range: false
-                                 }
-                            },
-                         tokenTypes: [],
-                         tokenModifiers: []
+                                 },
+                              tokenTypes: [],
+                              tokenModifiers: [],
+                              formats: ["relative"]
+                            }
                        },
                     window:
                       #{ workDoneProgress: true
@@ -318,6 +332,7 @@ init(LSP) :->
 
 :- public initialized/2.
 initialized(LSP, Result) :-
+    pp(Result),
     debug(lsp(init), 'initialized(~p)', [LSP]),
     send(LSP, initialized, Result).
 
@@ -522,12 +537,23 @@ uri_buffer(URIs, Buffer) :-
 %   @tbd Must be implemented by the mode
 
 'workspace/configuration'(Data, Result) :-
+    lsp_calling(LSP),
     debug(lsp(workspace),
-          'workspace/configuration(~@)',
-          [print_term(Data, [output(current_output)])]),
-    maplist(lsp_ws_configuration, Data.items, Result).
+          'workspace/configuration(~@) for ~p',
+          [print_term(Data, [output(current_output)]), LSP]),
+    maplist(lsp_ws_configuration(LSP), Data.items, Result),
+    debug(lsp(workspace),
+          '--> ~@',
+          [print_term(Result, [output(current_output)])]).
 
-lsp_ws_configuration(_, #{}).
+
+lsp_ws_configuration(LSP, Item, Config) :-
+    get(LSP, mode, Mode),
+    lsp_mode_module(Mode, Module),
+    current_predicate(Module:lsp_configuration/2),
+    Module:lsp_configuration(Item, Config),
+    !.
+lsp_ws_configuration(_LSP, _, #{}).
 
 %!  'workspace/applyEdit'(+Data, -Result) is det.
 %
@@ -538,7 +564,7 @@ lsp_ws_configuration(_, #{}).
     ->  pp(Data)
     ;   true
     ),
-    (   catch(lsp_apply_edits(Data), Error, true)
+    (   catch(lsp_apply_edits(Data.edit), Error, true)
     ->  (   var(Error)
         ->  Result = #{applied: true}
         ;   message_to_string(Error, Msg),
@@ -564,7 +590,7 @@ lsp_ws_configuration(_, #{}).
 
 lsp_apply_edits(Data),
     is_dict(Data),
-    dict_pairs(Data.get(edit).get(changes), _, Pairs),
+    dict_pairs(Data.get(changes), _, Pairs),
     maplist(file_change_set, Pairs, ChangePairs) =>
     maplist(apply_edit, ChangePairs).
 lsp_apply_edits(Data),

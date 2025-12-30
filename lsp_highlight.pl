@@ -203,7 +203,7 @@ style_attribute(Attr, Name := Value) :-
 mode_style(Mode, StyleClass, Attributes) :-
     nonvar(StyleClass),
     !,
-    atomic_list_concat([emacs_, Mode, '_mode'], Module),
+    lsp_mode_module(Mode, Module),
     (   Module:style(StyleClass, Attributes)
     ->  true
     ;   Module:def_style(StyleClass, Attributes)

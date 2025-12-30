@@ -59,12 +59,20 @@ lsp_server(clangd, Root,
               modes:      [c,cpp]
             }) :-
     findall(Arg, lsp_argument(clangd, Root, Arg), Argv).
+lsp_server('vale-ls', Root,
+           #{ executable: path('vale-ls'),
+              arguments:  Argv,
+              modes:      [markdown,latex,html]
+            }) :-
+    findall(Arg, lsp_argument('vale-ls', Root, Arg), Argv).
+/*
 lsp_server('ltex-ls', Root,
            #{ executable: path('ltex-ls'),
               arguments:  Argv,
               modes:      [markdown,latex,html]
             }) :-
     findall(Arg, lsp_argument('ltex-ls', Root, Arg), Argv).
+*/
 
 %!  lsp_argument(+Id, +Root, -Arg) is nondet.
 %
