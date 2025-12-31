@@ -62,7 +62,8 @@ lsp_server(clangd, Root,
 lsp_server('vale-ls', Root,
            #{ executable: path('vale-ls'),
               arguments:  Argv,
-              modes:      [markdown,latex,html]
+              modes:      [markdown,latex,html],
+              change:     1             % only full changes
             }) :-
     findall(Arg, lsp_argument('vale-ls', Root, Arg), Argv).
 /*

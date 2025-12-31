@@ -170,8 +170,12 @@ lsp_create_client(WS, Mode, Id, LSP) :-
     new(LSP, lsp_client(Id, WS,
                         Config.executable,
                         Config.get(arguments,[]))),
+    forall(lsp_configure(LSP, Config), true),
     send(LSP, mode, Mode),
     send(LSP, start).
+
+lsp_configure(LSP, Config) :-
+    send(LSP, slot, change, Config.get(change)).
 
 :- pce_end_class.
 
@@ -203,6 +207,7 @@ variable(arguments,	vector,        get,  "LSP excutable arguments").
 variable(connection,	prolog*,       get,  "The connecting stream").
 variable(initialized,   bool := @off,  get,  "LSP is ready").
 variable(pending_open,	chain*,        get,  "Pending didOpen()").
+variable(change,	'1..2' := 2,   both, "How to send changes").
 
 initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
            Program:program=prolog, Argv:arguments=[vector]) :->
@@ -297,6 +302,7 @@ init(LSP) :->
     get(LSP?workspace?root, path, Dir),
     uri_file_name(URI, Dir),
     current_prolog_flag(pid, PID),
+    get(LSP, change, Change), % 2=incremental, 1=full
     get(LSP, call,
         initialize(
             #{ capabilities:
@@ -304,7 +310,12 @@ init(LSP) :->
                       #{ configuration: true
                        },
                     textDocument:
-                      #{ publishDiagnostics:
+                      #{ synchronization:
+                           #{ openClose: true,
+                              didSave: true,
+                              change: Change
+                            },
+                         publishDiagnostics:
                            #{ formats: ["plaintext"]
                             },
                          semanticTokens:
@@ -718,6 +729,11 @@ document_close(URI, _Id, LSP) :-
                   }
               })).
 
+%   changed(+Buffer)
+%
+%   Triggered on each ->mark_undo when editing as well as on background
+%   changes such as ->reload or workspace edits.
+
 lsp_event(changed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     get(Buffer, attribute, lsp_clients, Clients),
@@ -761,6 +777,22 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
     ->  Text = ""
     ;   object(TextObj, string(Text))
     ).
+
+lsp_event(saved(Buffer)) :-
+    get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, attribute, lsp_clients, Clients),
+    for_sheet(Clients, document_saved(URI)).
+
+document_saved(URI, _Id, LSP) :-
+    debug(lsp(file), 'Saved ~p', [URI]),
+    send(LSP, notify,
+         'textDocument/didSave'(
+             #{ textDocument:
+                  #{ uri: URI
+                   }
+%              , text: Text
+              })).
+
 
                 /*******************************
                 *     EXTEND EMACS BUFFER      *
