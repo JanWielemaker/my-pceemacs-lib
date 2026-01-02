@@ -750,31 +750,59 @@ document_close(URI, _Id, LSP) :-
 
 %   changed(+Buffer)
 %
-%   Triggered on each ->mark_undo when editing as well as on background
-%   changes such as ->reload or workspace edits.
+%   Triggered on each ->mark_undo when editing  as well as on background
+%   changes such as ->reload or workspace edits. LSP defines two levels
+%   for handling:
+%
+%     - 1: send full text
+%     - 2: send incremental changes
+%
+%   The method text_buffer<-lsp_changes returns a  chain of xpce objects
+%   describing incremental changes or @nil if there are too many changes
+%   for incremental handling. In  the  latter   case  we  send the whole
+%   buffer and re-initialize incremental change tracking.
+%
+%   LSP servers may process incremental changes or   not. If it does not
+%   process incremental changes we  should  only   send  the  buffer  on
+%   specific actions, e.g., saving or Ctrl-L. Note   that we can ask for
+%   <-lsp_changes only once.
 
 lsp_event(changed(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     get(Buffer, attribute, lsp_clients, Clients),
+    change_levels(Clients, Levels),
+    send_changes(Levels, Buffer, URI, Clients).
+
+send_changes(Levels, Buffer, URI, Clients) :-
+    memberchk(2, Levels),
+    !,
     get(Buffer, lsp_changes, Changes),
-    get(Buffer, attribute, lsp_version, Version0),
-    Version is Version0+1,
-    send(Buffer, attribute, lsp_version, Version),
+    get(Buffer, lsp_increment_version, Version),
     (   Changes == @nil
     ->  get(Buffer, contents, string(Content)),
         JSONChanges = [ #{text: Content} ],
-        debug(lsp(changes), 'Sending whole buffer for ~p', [Buffer]),
+        debug(lsp(change), 'Sending whole buffer for ~p', [Buffer]),
         send(Buffer, lsp_changes, @on)      % re-enable incremental
     ;   chain_list(Changes, ChangeList),
         maplist(to_json, ChangeList, JSONChanges),
-        debug(lsp(changes), '~p: changes: ~@',
+        debug(lsp(change), '~p: changes: ~@',
               [ Buffer,
                 print_term(JSONChanges, [output(current_output)])
               ])
     ),
     for_sheet(Clients, document_changed(URI, Version, JSONChanges)).
+send_changes(_Levels, _Buffer, _URI, _Clients).
+
+%!  change_levels(+Clients:sheet, -Levels:list) is det.
+
+change_levels(Clients, Levels) :-
+    new(L, chain),
+    send(Clients, for_all, message(L, add, @arg1?value?change)),
+    chain_list(L, Levels).
 
 document_changed(URI, Version, JSONChanges, _Id, LSP) :-
+    get(LSP, change, 2),
+    !,
     send(LSP, notify,
          'textDocument/didChange'(
              #{ textDocument:
@@ -783,6 +811,7 @@ document_changed(URI, Version, JSONChanges, _Id, LSP) :-
                    },
                 contentChanges: JSONChanges
               })).
+document_changed(_URI, _Version, _JSONChanges, _Id, _LSP).
 
 to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
                              end: #{line: EL, character: EP}
@@ -800,16 +829,17 @@ to_json(Change, #{ range: #{ start: #{line: SL, character: SP},
 lsp_event(saved(Buffer)) :-
     get(Buffer, attribute, lsp_tracking, URI),
     get(Buffer, attribute, lsp_clients, Clients),
-    for_sheet(Clients, document_saved(URI)).
+    for_sheet(Clients, document_saved(Buffer, URI)).
 
-document_saved(URI, _Id, LSP) :-
+document_saved(Buffer, URI, _Id, LSP) :-
     debug(lsp(file), 'Saved ~p', [URI]),
+    get(Buffer, contents, string(Content)),
     send(LSP, notify,
          'textDocument/didSave'(
              #{ textDocument:
                   #{ uri: URI
-                   }
-%              , text: Text
+                   },
+                text: Content
               })).
 
 
@@ -888,7 +918,57 @@ on_symbol(M) :->
     char_type(Char, alnum),
     !.
 
+%   ->lsp_send_change_full
+%
+%   Send a level 1 change message  to   all  change  level 1 LSP clients
+%   connected to this mode. Fails if there   are  no such clients or the
+%   buffer was not changed since our latest message.
+
+lsp_send_change_full(M) :->
+    "Send changes to change level 1 clients"::
+    get(M, text_buffer, Buffer),
+    get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, attribute, lsp_clients, Clients),
+    change_levels(Clients, Levels),
+    memberchk(1, Levels),
+    get(Buffer, generation, Gen),
+    \+ get(Buffer, attribute, lsp_change_full_generation, Gen),
+    send(Buffer, attribute, lsp_change_full_generation, Gen),
+    get(Buffer, lsp_increment_version, Version),
+    get(Buffer, contents, string(Content)),
+    for_sheet(Clients, send_change_full(URI, Version, Buffer, Content)).
+
+send_change_full(URI, Version, Buffer, Content, _Id, LSP) :-
+    get(LSP, change, 1),
+    !,
+    debug(lsp(change), 'Sending full change for ~p@~p to ~p',
+          [Buffer, Version, LSP]),
+    send(LSP, notify,
+         'textDocument/didChange'(
+             #{ textDocument:
+                  #{ uri: URI,
+                     version: Version
+                   },
+                contentChanges: [ #{text: Content} ]
+              })).
+
 :- emacs_end_mode.
+
+
+                /*******************************
+                *      BUFFER EXTENSIONS       *
+                *******************************/
+
+:- pce_extend_class(emacs_buffer).
+
+lsp_increment_version(Buffer, Version:int) :<-
+    "Increment and return current version"::
+    get(Buffer, attribute, lsp_version, Version0),
+    Version is Version0+1,
+    send(Buffer, attribute, lsp_version, Version).
+
+:- pce_end_class.
+
 
                 /*******************************
                 *             UTIL             *
