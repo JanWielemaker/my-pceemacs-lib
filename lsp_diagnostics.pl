@@ -43,6 +43,7 @@
 :- use_module(library(pce_util)).
 
 :- use_module(lsp_client).
+:- use_module(library(filesex)).
 
 /** <module> Handle LSP disagnostic messages
 
@@ -141,7 +142,7 @@ goto_next_error(M) :->
     "Go to the next LSP diagnostic"::
     send(M, goto_lsp_diagnostic, next).
 
-goto_next_error(M) :->
+goto_prev_error(M) :->
     "Go to the previous LSP diagnostic"::
     send(M, goto_lsp_diagnostic, prev).
 
@@ -151,6 +152,9 @@ goto_next_error(M) :->
                 /*******************************
                 *     EXTEND EMACS BUFFER      *
                 *******************************/
+
+:- dynamic
+    session_dictionary/1.
 
 :- pce_extend_class(emacs_buffer).
 
@@ -179,11 +183,14 @@ show_diagnostic(Buffer, LSP, State, Diagnostic) :-
     lsp_offset(Start, Buffer, StartOffset),
     lsp_offset(End, Buffer, EndOffset),
     Length is EndOffset-StartOffset,
-    lsp_severity_type(Severity, _Name, Style),
-    step_count(Severity, State),
-    new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
-                                Diagnostic, Style)),
-    send(D, slot, lsp_client, LSP).
+    (   suppressed(Buffer, LSP, StartOffset, Length, Diagnostic)
+    ->  true
+    ;   lsp_severity_type(Severity, _Name, Style),
+        step_count(Severity, State),
+        new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
+                                    Diagnostic, Style)),
+        send(D, slot, lsp_client, LSP)
+    ).
 
 lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
     get(Buffer, lsp_offset, Line, Char, Offset).
@@ -192,6 +199,14 @@ step_count(Severity, State) :-
     arg(Severity, State, C0),
     C is C0+1,
     nb_setarg(Severity, State, C).
+
+suppressed(Buffer, LSP, StartOffset, Length, Diagnostic) :-
+    get(LSP, config, Config),
+    SpellingCode = Config.get(spelling).get(code),
+    atom_string(SpellingCode, Diagnostic.get(code)),
+    get(Buffer, contents, StartOffset, Length, string(String)),
+    atom_string(Word, String),
+    session_dictionary(Word).
 
 :- pce_end_class.
 
@@ -230,7 +245,7 @@ source(F, Source:name) :<-
 code(F, Code:name) :<-
     "Get the diagnostic code"::
     get(F, json, Dict),
-    Code = Dict.get(code).
+    atom_string(Code, Dict.get(code)).
 
 range(F, Range:prolog) :<-
     "Get the original range as Prolog dict"::
@@ -365,24 +380,33 @@ fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
             append_fix_button(W, Group, Range, Count, Fix),
             fail
         ;   true
-        )
+        ),
+        send(W, add_dictionary_buttons, Fragment)
     ).
+
+action_button(W, Icon:image, Title:char_array, Msg:code) :->
+    "Add button with icon"::
+    get(W, member, message, MsgGroup),
+    get(MsgGroup, member, buttons, Group),
+    send(Group, append,
+         new(LBL, label(icon, Icon)),
+         next_row),
+    send(Group, append,
+         new(B, button(Title, Msg)),
+         right),
+    send(LBL, width, 32),
+    send(LBL, reference, point(0, B?reference?y)),
+    send(B, alignment, left).
 
 append_fix_button(W, Group, Range, Count, Fix),
     fix_command(Fix, Range, Title, Command, Args, Kind) =>
     debug(lsp(fix), "Fix: ~@",
           [print_term(Fix, [output(current_output)])]),
     fix_icon(Command, Kind, Icon),
-    send(Group, append,
-         new(LBL, label(icon, image(Icon))),
-         next_row),
-    send(Group, append,
-         new(B, button(Title, message(W, apply_change, Title))),
-         right),
-    add_replace_all(Count, Command, Args, W, Group),
-    send(LBL, width, 32),
-    send(LBL, reference, point(0, B?reference?y)),
-    send(B, alignment, left).
+    send(W, action_button,
+         image(Icon), Title,
+         message(W, apply_change, Title)),
+    add_replace_all(Count, Command, Args, W, Group).
 append_fix_button(_W, _Group, _Range, _Count, Fix) =>
     debug(lsp(unknown_fix), "Unknown fix: ~@",
           [print_term(Fix, [output(current_output)])]).
@@ -397,7 +421,6 @@ add_replace_all(N, "pce_emacs.edit", replace(With), W, Group) :-
          right),
     send(B, alignment, column).
 add_replace_all(_, _, _, _, _).
-
 
 %!  fix_command(+CodeAction, +Range, -Title, -Command, -Args, -Kind) is
 %!              semidet.
@@ -489,6 +512,59 @@ replace_all(W, With:char_array) :->
            ( send(F, string, With),
              send(F, free)
            )).
+
+:- pce_group(spelling).
+
+% Deal   with   suppressing   and   dictionary   additions.   Some   LSP
+% implementation do this for you,  some  don't.   In  that  case the LSP
+% registration should contain a key `spelling` with values `code` set to
+% the diagnostic code emitted  for   spelling  errors  and `dictionary`,
+% pointing at a file that is used for the user dictionary.
+
+%   ->add_dictionary_buttons(+Fragment)
+%
+%   Added _accept_ and _dictionary_  buttons  if   this  is  a  spelling
+%   correction action and the LSP registry asks us to.
+
+add_dictionary_buttons(W, Fragment:emacs_lsp_diagnostic) :->
+    "Add buttons for accept and dictionary"::
+    get(Fragment, code, Code),
+    get(Fragment, lsp_client, LSP),
+    get(LSP, config, Dict),
+    Code == Dict.get(spelling).get(code),
+    get(Fragment?string, value, Word),
+    send(W, action_button, image('64x64/dictionary.png'),
+         'Accept (session)', message(W, accept, Word, session)),
+    send(W, action_button, image('64x64/dictionary.png'),
+         add_to_dictionary, message(W, accept, Word, dictionary)).
+
+accept(W, Word:name, Scope:{session,dictionary}) :->
+    "Accept a word marked as spelling error"::
+    get(W, hypered, fragment, Fragment),
+    (   Scope == session
+    ->  asserta(session_dictionary(Word))
+    ;   get(Fragment, lsp_client, LSP),
+        get(LSP, config, Dict),
+        FileSpec = Dict.get(spelling).get(dictionary),
+        dictionary_file(FileSpec, File),
+        setup_call_cleanup(
+            open(File, append, Out,
+                 [ encoding(utf8)
+                 ]),
+            format(Out, '~w~n', [Word]),
+            close(Out))
+    ),
+    same_diagnostics(Fragment, All),
+    forall(member(F, All),
+           send(F, free)).
+
+dictionary_file(FileSpec, File) :-
+    atomic(FileSpec),
+    expand_file_name(FileSpec, [File]).
+dictionary_file(FileSpec, File) :-
+    absolute_file_name(FileSpec, File,
+                       [ access(write)
+                       ]).
 
 :- pce_end_class.
 

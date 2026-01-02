@@ -175,6 +175,8 @@ lsp_create_client(WS, Mode, Id, LSP) :-
     send(LSP, start).
 
 lsp_configure(LSP, Config) :-
+    send(LSP, slot, config, Config).
+lsp_configure(LSP, Config) :-
     send(LSP, slot, change, Config.get(change)).
 
 :- pce_end_class.
@@ -208,6 +210,7 @@ variable(connection,	prolog*,       get,  "The connecting stream").
 variable(initialized,   bool := @off,  get,  "LSP is ready").
 variable(pending_open,	chain*,        get,  "Pending didOpen()").
 variable(change,	'1..2' := 2,   both, "How to send changes").
+variable(config,	prolog*,       get,  "Dict holding configuration").
 
 initialise(LSP, Id:name, Workspace:workspace=lsp_workspace,
            Program:program=prolog, Argv:arguments=[vector]) :->
@@ -506,6 +509,12 @@ execute_command(LSP, Command:command=prolog, Args:arguments=prolog) :->
                 type: true
               }
          }),
+    'window/showMessage'(
+        #{ parameters:
+             #{ message: true,
+                type: true
+              }
+         }),
     '$/progress'(
         #{ parameters:
              #{}
@@ -695,6 +704,17 @@ lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
       message: Message} :< Data,
     message_level(Type, Kind),
     print_message(Kind, lsp(log(Message))).
+
+%!  'window/showMessage'(+Data)
+%
+%   @tbd Should use ->report to the current PceEmacs window.
+
+:- det('window/showMessage'/1).
+'window/showMessage'(Data) :-
+    #{type: Type,		% 1: error, 2: warnig, 3:info, 4: log
+      message: Message} :< Data,
+    message_level(Type, Kind),
+    print_message(Kind, lsp(show(Message))).
 
 message_level(1, error).
 message_level(2, warning).
@@ -991,3 +1011,19 @@ for_sheet_loop(I, Count, Sheet, Action) :-
     I2 is I+1,
     for_sheet_loop(I2, Count, Sheet, Action).
 for_sheet_loop(_I, _Count, _Sheet, _Action).
+
+
+                /*******************************
+                *           MESSAGES           *
+                *******************************/
+
+:- multifile
+    prolog:message//1.
+
+prolog:message(lsp(Msg)) -->
+    lsp_message(Msg).
+
+lsp_message(log(Message)) -->
+    [ '~s'-[Message] ].
+lsp_message(show(Message)) -->
+    [ 'TODO: show ~s'-[Message] ].

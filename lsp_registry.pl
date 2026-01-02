@@ -63,7 +63,11 @@ lsp_server('vale-ls', Root,
            #{ executable: path('vale-ls'),
               arguments:  Argv,
               modes:      [markdown,latex,html],
-              change:     1             % only full changes
+              change:     1,             % only full changes
+              spelling:
+                #{ code: 'Vale.Spelling',
+                   dictionary: '~/.local/share/vale/styles/config/vocabularies/Project/accept.txt'
+                 }
             }) :-
     findall(Arg, lsp_argument('vale-ls', Root, Arg), Argv).
 /*
