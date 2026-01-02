@@ -353,31 +353,52 @@ append_pars([H|T], PB) =>
 fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     "Add buttons for available fixes"::
     get(Fragment, fixes, Fixes),
-    get(Fragment, range, Range),
-    (   member(Fix, Fixes),
-        append_fix_button(W, Range, Fix),
-        fail
-    ;   true
+    (   Fixes == []
+    ->  true
+    ;   get(Fragment, range, Range),
+        same_diagnostics(Fragment, All),
+        length(All, Count),
+        get(W, member, message, MsgGroup),
+        send(MsgGroup, append,
+             new(Group, dialog_group(buttons, group)),
+             next_row),
+        (   member(Fix, Fixes),
+            append_fix_button(W, Group, Range, Count, Fix),
+            fail
+        ;   true
+        )
     ).
 
-append_fix_button(W, Range, Fix),
-    fix_command(Fix, Range, Title, Command, _Args, Kind) =>
+append_fix_button(W, Group, Range, Count, Fix),
+    fix_command(Fix, Range, Title, Command, Args, Kind) =>
     debug(lsp(fix), "Fix: ~@",
           [print_term(Fix, [output(current_output)])]),
     fix_icon(Command, Kind, Icon),
-    get(W, member, message, Group),
     send(Group, append,
          new(LBL, label(icon, image(Icon))),
          next_row),
     send(Group, append,
          new(B, button(Title, message(W, apply_change, Title))),
          right),
+    add_replace_all(Count, Command, Args, W, Group),
     send(LBL, width, 32),
     send(LBL, reference, point(0, B?reference?y)),
     send(B, alignment, left).
-append_fix_button(_W, _Range, Fix) =>
+append_fix_button(_W, _Group, _Range, _Count, Fix) =>
     debug(lsp(unknown_fix), "Unknown fix: ~@",
           [print_term(Fix, [output(current_output)])]).
+
+add_replace_all(1, _, _, _, _) :-
+    !.
+add_replace_all(N, "pce_emacs.edit", replace(With), W, Group) :-
+    !,
+    format(string(Label), 'Replace all ~D occurrences', [N]),
+    send(Group, append,
+         new(B, button(Label, message(W, replace_all, With))),
+         right),
+    send(B, alignment, column).
+add_replace_all(_, _, _, _, _).
+
 
 %!  fix_command(+CodeAction, +Range, -Title, -Command, -Args, -Kind) is
 %!              semidet.
@@ -461,12 +482,22 @@ apply_change(W, TitleObj:string) :->
         send(LSP, execute_command, Command, Args)
     ).
 
+replace_all(W, With:char_array) :->
+    "Replace all \"same\" diagnostics"::
+    get(W, hypered, fragment, Fragment),
+    same_diagnostics(Fragment, All),
+    forall(member(F, All),
+           ( send(F, string, With),
+             send(F, free)
+           )).
+
 :- pce_end_class.
 
 %!  same_diagnostics(+To:emacs_lsp_diagnostic, -List) is det.
 %
 %   Find equivalent diagnostic messages.
 
+:- det(same_diagnostics/2).
 same_diagnostics(To, List) :-
     get(To, string, Text),
     get(To, source, Source),
