@@ -225,6 +225,15 @@ identify(F) :->
     style_pce_severity(Style, Severity, Label),
     send(F?text_buffer, report, Severity, '%s: %s', Label, F?message).
 
+source(F, Source:name) :<-
+    "Get the origin of the diagnostic"::
+    get(F?lsp_client, id, Source).
+
+code(F, Code:name) :<-
+    "Get the diagnostic code"::
+    get(F, json, Dict),
+    Code = Dict.get(code).
+
 lsp_class(F, LspClass:{error,warning,info,hint}) :<-
     "Get severity class"::
     get(F, style, Style),
@@ -419,3 +428,29 @@ apply_change(W, TitleObj:string) :->
     send(LSP, execute_command, Command, Args).
 
 :- pce_end_class.
+
+%!  same_diagnostics(+To:emacs_lsp_diagnostic, -List) is det.
+%
+%   Find equivalent diagnostic messages.
+
+same_diagnostics(To, List) :-
+    get(To, string, Text),
+    get(To, source, Source),
+    get(To, code, Code),
+    get(To, text_buffer, TB),
+    get(TB, first_fragment, Start),
+    same_diagnostics(Start, Text, Source, Code, List).
+
+same_diagnostics(Frag, Text, Source, Code, List) :-
+    send(Frag, instance_of, emacs_lsp_diagnostic),
+    (   send(Frag?string, equal, Text),
+        get(Frag, source, Source),
+        get(Frag, code, Code)
+    ->  List = [Frag|Tail]
+    ;   Tail = List
+    ),
+    (   get(Frag, next, message(@arg1, instance_of, emacs_lsp_diagnostic),
+            Next)
+    ->  same_diagnostics(Next, Text, Source, Code, Tail)
+    ;   Tail = []
+    ).
