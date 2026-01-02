@@ -401,7 +401,9 @@ fix_icon(_,                   _, '64x64/lsp-apply-fix.png').
 
 %   ->apply_change(+Title)
 %
-%   Apply the selected code action
+%   Apply the selected code action.
+%
+%   (*) Note that killing the fragment also kills this window.
 
 apply_change(W, TitleObj:string) :->
     "Apply a selected change"::
@@ -413,7 +415,7 @@ apply_change(W, TitleObj:string) :->
     ->  true
     ),
     get(W, lsp_client, LSP),
-    send(W, destroy),
+    send(W, send_hyper, fragment, free),	% see (*)
     send(LSP, execute_command, Command, Args).
 
 :- pce_end_class.
