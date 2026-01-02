@@ -7,8 +7,8 @@
 :- use_module(lsp_highlight).
 
 %:- debug(lsp(workspace)).
-:- debug(lsp(_)).
-:- debug(json_rpc(_)).
+%:- debug(lsp(_)).
+%:- debug(json_rpc(_)).
 
                 /*******************************
                 *            THEME             *

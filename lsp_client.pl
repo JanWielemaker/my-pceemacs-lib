@@ -46,6 +46,7 @@
 :- use_module(library(lists)).
 :- use_module(library(pce_util)).
 :- use_module(library(uri)).
+:- autoload(library(pprint)).
 
 :- use_module(lsp_registry).
 
@@ -346,7 +347,6 @@ init(LSP) :->
 
 :- public initialized/2.
 initialized(LSP, Result) :-
-    pp(Result),
     debug(lsp(init), 'initialized(~p)', [LSP]),
     send(LSP, initialized, Result).
 
@@ -543,7 +543,7 @@ uri_buffer(URIs, Buffer) :-
 
 'textDocument/publishDiagnostics'(Data) :-
     (   debugging(lsp(diagnostics))
-    ->  pp(Data)
+    ->  print_term(Data, [nl(true)])
     ;   true
     ),
     lsp_calling(LSP),
@@ -587,7 +587,7 @@ lsp_ws_configuration(_LSP, _, #{}).
 
 'workspace/applyEdit'(Data, Result) :-
     (   debugging(lsp(edit))
-    ->  pp(Data)
+    ->  print_term(Data, [nl(true)])
     ;   true
     ),
     (   catch(lsp_apply_edits(Data.edit), Error, true)
