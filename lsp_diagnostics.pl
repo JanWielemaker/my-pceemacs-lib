@@ -93,8 +93,6 @@ lsp_icon(hint,    '64x64/lsp-hint.png').
                        goto_prev_error = key('\\egp')
                      ]).
 
-:- pce_group(diagnostic).
-
 selected_fragment(M, Fragment:fragment) :->
     "User selected a fragment in the margin"::
     send(M, show_fragment_note, Fragment).
@@ -172,7 +170,7 @@ report_diagnostic_counts(Counts, Buffer) :-
     (   Counts == counts(0,0,0,0)
     ->  true
     ;   send(Buffer?editors, for_all,
-             message(@arg1, margin_width, 22))
+             message(@arg1, lsp_enable_margin, @on))
     ).
 
 show_diagnostic(Buffer, LSP, State, Diagnostic) :-
@@ -280,7 +278,8 @@ fixes(F, Fixes:prolog) :<-
 
 variable(lsp_client, lsp_client*, get, "Source LSP client").
 
-class_variable(text_width, int, 400).
+class_variable(text_width, int, 400,
+               "Width for layout of diagnostic message").
 
 initialise(W, Editor:editor, Fragment:emacs_lsp_diagnostic,
            Hover:[bool]) :->

@@ -126,6 +126,24 @@ highlight_tokens([IL,IP,Len,Tid,Mid|More], LSP, TB, SL0, SP0, O0, C0, C) :-
 
 :- emacs_extend_mode(language, []).
 
+class_variable(lsp_margin_width, int, 22,
+               "Width for diagnostic icon margin").
+
+:- pce_group(diagnostic).
+
+lsp_enable_margin(M, Enable:[bool]) :->
+    "Enable the diagnostic margin"::
+    (   Enable == @off
+    ->  send(M, margin_width, 0)
+    ;   (   Enable == @on
+        ;   get(M, find_fragment,
+                message(@arg1, instance_of, emacs_lsp_diagnostic), _)
+        )
+    ->  get(M, class_variable_value, lsp_margin_width, Width),
+        send(M, margin_width, Width)
+    ).
+
+
 %   ->lsp_setup_highlight()
 %
 %   Prepare the editor for LSP based highligting.  This serves two
@@ -163,7 +181,8 @@ setup_styles(M) :->
         forall(style(ModeName, _Class, Name, Style),
                send(E, style, Name, Style)),
         send(E, attribute, styles_assigned, @on)
-    ).
+    ),
+    send(M, lsp_enable_margin).
 
 colourise_buffer(M) :->
     "Use LSP based highlighting"::
