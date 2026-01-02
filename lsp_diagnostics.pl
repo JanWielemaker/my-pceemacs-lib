@@ -234,6 +234,11 @@ code(F, Code:name) :<-
     get(F, json, Dict),
     Code = Dict.get(code).
 
+range(F, Range:prolog) :<-
+    "Get the original range as Prolog dict"::
+    get(F, json, Dict),
+    Range = Dict.get(range).
+
 lsp_class(F, LspClass:{error,warning,info,hint}) :<-
     "Get severity class"::
     get(F, style, Style),
@@ -341,17 +346,22 @@ append_pars([H|T], PB) =>
     send_list(PB, append, [@nbsp,@br]),
     append_pars(T, PB).
 
+%   ->fixes_buttons(Fragment)
+%
+%   Add buttons for the proposed fixes.
+
 fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     "Add buttons for available fixes"::
     get(Fragment, fixes, Fixes),
+    get(Fragment, range, Range),
     (   member(Fix, Fixes),
-        append_fix_button(W, Fix),
+        append_fix_button(W, Range, Fix),
         fail
     ;   true
     ).
 
-append_fix_button(W, Fix),
-    fix_command(Fix, Title, Command, _Args, Kind) =>
+append_fix_button(W, Range, Fix),
+    fix_command(Fix, Range, Title, Command, _Args, Kind) =>
     debug(lsp(fix), "Fix: ~@",
           [print_term(Fix, [output(current_output)])]),
     fix_icon(Command, Kind, Icon),
@@ -365,30 +375,47 @@ append_fix_button(W, Fix),
     send(LBL, width, 32),
     send(LBL, reference, point(0, B?reference?y)),
     send(B, alignment, left).
-append_fix_button(_W, Fix) =>
+append_fix_button(_W, _Range, Fix) =>
     debug(lsp(unknown_fix), "Unknown fix: ~@",
           [print_term(Fix, [output(current_output)])]).
 
-%!  fix_command(+CodeAction, -Title, -Command, -Args, -Kind) is semidet.
+%!  fix_command(+CodeAction, +Range, -Title, -Command, -Args, -Kind) is
+%!              semidet.
 %
 %   If  the  command  is  an  immediate  edit,  Command  is  unified  to
 %   `"pce_emacs.edit"`.
 
-fix_command(Fix, Title, Command, Args, Kind),
+fix_command(Fix, _Range, Title, Command, Args, Kind),
     #{ command: CommandDict, title: Title } :< Fix,
     is_dict(CommandDict),
     #{ command: Command, arguments: Args } :< CommandDict =>
     Kind = Fix.get(kind, "unknown").
-fix_command(Fix, Title, Command, Edits, Kind),
+fix_command(Fix, Range, Title, Command, Edits, Kind),
     #{ edit: Edit, title: Title } :< Fix,
-    fix_edits(Edit, Edits) =>
+    fix_edits(Edit, Range, Edits) =>
     Command = "pce_emacs.edit",
     Kind = Fix.get(kind, "unknown").
-fix_command(Fix, Title, Command, Args, Kind),
+fix_command(Fix, _Range, Title, Command, Args, Kind),
     #{ command: Command, arguments: Args, title: Title } :< Fix =>
     Kind = Fix.get(kind, "unknown").
-fix_command(_Fix, _Title, _Command, _Args, _Kind) =>
+fix_command(_Fix, _Range, _Title, _Command, _Args, _Kind) =>
     fail.
+
+%!  fix_edits(+Dict, +Range, -Edits:dict) is semidet.
+%
+%   Normalize the `edit` field  to  a   dict  holding  `changes`, a dict
+%   mapping document URIs to a list  of   changes.  If  the edit exactly
+%   replaces  the  diagnostics  fragment,   Edits    is   unified   with
+%   replace(NewText). This detection allows for batch replacement of all
+%   equivalent diagnostics.
+
+fix_edits(Dict, Range, Edits) :-
+    fix_edits(Dict, Edits0),
+    (   dict_pairs(Edits0.get(changes), _, [_URI-[Change]]),
+        #{newText:Replace, range:Range} :< Change
+    ->  Edits = replace(Replace)
+    ;   Edits = Edits0
+    ).
 
 fix_edits(Dict, Edits),
     is_dict(Dict),
@@ -417,15 +444,22 @@ fix_icon(_,                   _, '64x64/lsp-apply-fix.png').
 apply_change(W, TitleObj:string) :->
     "Apply a selected change"::
     get(W, get_hyper, fragment, fixes, Fixes),
+    get(W, get_hyper, fragment, range, Range),
     object(TitleObj, string(TitleAtom)),
     atom_string(TitleAtom, Title),
     (   member(Fix, Fixes),
-        fix_command(Fix, Title, Command, Args, _Kind)
+        fix_command(Fix, Range, Title, Command, Args, _Kind)
     ->  true
     ),
     get(W, lsp_client, LSP),
-    send(W, send_hyper, fragment, free),	% see (*)
-    send(LSP, execute_command, Command, Args).
+    (   Command = "pce_emacs.edit",
+        Args = replace(NewText)
+    ->  debug(lsp(replace), 'Direct replace with ~p', [NewText]),
+        send(W, send_hyper, fragment, string, NewText),
+        send(W, send_hyper, fragment, free)
+    ;   send(W, send_hyper, fragment, free),	% see (*)
+        send(LSP, execute_command, Command, Args)
+    ).
 
 :- pce_end_class.
 
