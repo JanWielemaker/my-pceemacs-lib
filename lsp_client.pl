@@ -500,6 +500,12 @@ execute_command(LSP, Command:command=prolog, Args:arguments=prolog) :->
              #{ token: true
               }
          }) : true,
+    'window/logMessage'(
+        #{ parameters:
+             #{ message: true,
+                type: true
+              }
+         }),
     '$/progress'(
         #{ parameters:
              #{}
@@ -681,6 +687,19 @@ lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
 
 'window/workDoneProgress/create'(_Data, null).
 
+%!  'window/logMessage'(+Data) is det.
+
+:- det('window/logMessage'/1).
+'window/logMessage'(Data) :-
+    #{type: Type,		% 1: error, 2: warnig, 3:info, 4: log
+      message: Message} :< Data,
+    message_level(Type, Kind),
+    print_message(Kind, lsp(log(Message))).
+
+message_level(1, error).
+message_level(2, warning).
+message_level(3, informational).
+message_level(4, debug).
 
 %!  '$/progress'(+Data) is det.
 
