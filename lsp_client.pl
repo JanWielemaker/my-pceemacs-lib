@@ -722,6 +722,7 @@ lsp_event(opened(Buffer)) :-
     File \== @nil,
     get(File, path, Path),
     ensure_lsp_server(Buffer, Path, Mode, Clients),
+    \+ send(Clients?members, empty),
     uri_file_name(URI, Path),
     debug(lsp(file), 'Opened ~p', [URI]),
     send(Buffer, attribute, lsp_version, 1),
