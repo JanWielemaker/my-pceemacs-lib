@@ -5,6 +5,7 @@
 
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_highlight).
+:- use_module(vale).
 
 %:- debug(lsp(workspace)).
 %:- debug(lsp(_)).
@@ -54,7 +55,9 @@ emacs_latex_mode:lsp_configuration(Item, Config) :-
                 *             MODE             *
                 *******************************/
 
-:- emacs_extend_mode(latex, []).
+:- emacs_extend_mode(latex,
+                     [ vale_check = key('\\C-l')
+                     ]).
 
 class_variable(auto_colourise_size_limit, int, 400000).
 class_variable(idle_timeout,              num, 0.3).
