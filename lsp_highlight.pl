@@ -188,7 +188,11 @@ colourise_buffer(M) :->
     "Use LSP based highlighting"::
     get(M, text_buffer, TB),
     (   get(M, lsp_client, highlight, LSP),
-        send(TB, lsp_highlight, LSP)
+        (   get(LSP, initialized, @on)
+        ->  send(TB, lsp_highlight, LSP)
+        ;   send(LSP, register_pending,
+                 message(M, colourise_buffer))
+        )
     ->  send(M, update_bookmarks)
     ;   send_super(M, colourise_buffer)
     ),

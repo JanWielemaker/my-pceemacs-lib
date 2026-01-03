@@ -209,7 +209,7 @@ variable(program,	prolog,	       get,  "LSP excutable").
 variable(arguments,	vector,        get,  "LSP excutable arguments").
 variable(connection,	prolog*,       get,  "The connecting stream").
 variable(initialized,   bool := @off,  get,  "LSP is ready").
-variable(pending_open,	chain*,        get,  "Pending didOpen()").
+variable(pending,	chain*,        get,  "Pending actions").
 variable(change,	'1..2' := 2,   both, "How to send changes").
 variable(config,	prolog*,       get,  "Dict holding configuration").
 
@@ -363,7 +363,12 @@ initialized(LSP, Result:prolog) :->
         print_message(error, E)),
     send(LSP, notify, initialized(#{})),
     send(LSP, slot, initialized, @on),
-    send(LSP, send_pending).
+    % needs to be called in next event cycle
+    new(T, timer(0.1,
+                 and(message(LSP, send_pending_actions),
+                     message(@receiver, free)))),
+    send(T, start, once),
+    send(T, lock_object, @on).
 
 :- dynamic
     token_type/3,                         % LSP, TypeId, TypeName
@@ -423,19 +428,24 @@ did_open(LSP, Buffer:emacs_buffer) :->
     "Buffer was opened"::
     (   get(LSP, initialized, @on)
     ->  send(LSP, notify_did_open, Buffer)
-    ;   get(LSP, pending_open, Chain),
-        Chain \== @nil
-    ->  send(Chain, append, Buffer)
-    ;   send(LSP, slot, pending_open, chain(Buffer))
+    ;   send(LSP, register_pending,
+             message(LSP, notify_did_open, Buffer))
     ).
 
-send_pending(LSP) :->
-    "Send pending didOpen()"::
-    (   get(LSP, pending_open, Chain),
+register_pending(LSP, Message:code) :->
+    "Register an action to be called when LSP is initialized"::
+    (   get(LSP, pending, Chain),
         Chain \== @nil
-    ->  send(Chain, for_all,
-             message(LSP, notify_did_open, @arg1)),
-        send(LSP, slot, pending_open, @nil)
+    ->  send(Chain, append, Message)
+    ;   send(LSP, slot, pending, chain(Message))
+    ).
+
+send_pending_actions(LSP) :->
+    "Send pending didOpen()"::
+    (   get(LSP, pending, Chain),
+        Chain \== @nil
+    ->  send(Chain, for_all, message(@arg1, execute)),
+        send(LSP, slot, pending, @nil)
     ;   true
     ).
 
