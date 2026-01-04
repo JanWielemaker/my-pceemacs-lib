@@ -64,6 +64,11 @@ class_variable(idle_timeout,              num, 0.3).
 class_variable(lsp_roles,		  sheet*,
                sheet(attribute(diagnostics, 'vale-ls'))).
 
+colourise_buffer(M) :->
+    "Do spell checking"::
+    send_super(M, colourise_buffer),
+    send(M, vale_check_region).
+
 setup_mode(M) :->
      "Setup LSP based LaTeX mode"::
     send_super(M, setup_mode),
