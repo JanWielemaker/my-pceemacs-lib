@@ -41,9 +41,9 @@
 :- use_module(library(debug)).
 :- use_module(library(lists)).
 :- use_module(library(pce_util)).
+:- use_module(library(uri)).
 
 :- use_module(lsp_client).
-:- use_module(library(filesex)).
 
 /** <module> Handle LSP disagnostic messages
 
@@ -158,30 +158,48 @@ goto_prev_error(M) :->
 
 :- pce_extend_class(emacs_buffer).
 
-lsp_publish_diagnostics(Buffer, LSP:lsp_client, Diagnostics:prolog) :->
+lsp_publish_diagnostics(Buffer, LSP:lsp=lsp_client,
+                        Diagnostics:diagnostics=prolog,
+                        Region:lsp_region_fragment*) :->
     "Create fragments from diagnostics"::
-    send(Buffer, for_all_fragments,
-         if(message(@arg1, instance_of, emacs_lsp_diagnostic),
-            message(@arg1, free))),
+    send(Buffer, lsp_clear_diagnostics, Region),
+    (   Region == @nil
+    ->  LineOffset = 0
+    ;   get(Region, start, Start),
+        get(Buffer, line_number, Start, Line1),
+        LineOffset is Line1-1
+    ),
     State = counts(0,0,0,0),
-    maplist(show_diagnostic(Buffer, LSP, State), Diagnostics),
+    maplist(show_diagnostic(Buffer, LSP, State, LineOffset),
+            Diagnostics),
     report_diagnostic_counts(State, Buffer),
     debug(lsp(diagnostics), 'Counts: ~p', [State]).
 
+%!  report_diagnostic_counts(+Counts, +Buffer) is det.
+%
+%   Report diagnostic message count if there are diagnostics.
+%
+%   @tbd: If we just did a region, should we report for the entire file?
+
 report_diagnostic_counts(Counts, Buffer) :-
-    Counts = counts(E,W,I,H),
-    send(Buffer, report, status, 'E: %d, W: %d, I: %d, H:%d', E,W,I,H),
     (   Counts == counts(0,0,0,0)
     ->  true
     ;   send(Buffer?editors, for_all,
-             message(@arg1, lsp_enable_margin, @on))
+             message(@arg1, lsp_enable_margin, @on)),
+        Counts = counts(E,W,I,H),
+        (   E == 0
+        ->  Level = status
+        ;   Level = warning
+        ),
+        send(Buffer, report, Level,
+             'E:%d, W:%d, I:%d, H:%d', E,W,I,H)
     ).
 
-show_diagnostic(Buffer, LSP, State, Diagnostic) :-
+show_diagnostic(Buffer, LSP, State, LineOffset, Diagnostic) :-
     #{range: Range, severity: Severity} :< Diagnostic,
     #{start: Start, end: End} :< Range,
-    lsp_offset(Start, Buffer, StartOffset),
-    lsp_offset(End, Buffer, EndOffset),
+    lsp_offset(Start, Buffer, LineOffset, StartOffset),
+    lsp_offset(End, Buffer, LineOffset, EndOffset),
     Length is EndOffset-StartOffset,
     (   suppressed(Buffer, LSP, StartOffset, Length, Diagnostic)
     ->  true
@@ -192,13 +210,27 @@ show_diagnostic(Buffer, LSP, State, Diagnostic) :-
         send(D, slot, lsp_client, LSP)
     ).
 
-lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
-    get(Buffer, lsp_offset, Line, Char, Offset).
+lsp_offset(#{line:Line, character:Char}, Buffer, LineOffset, Offset) =>
+    TheLine is Line+LineOffset,
+    get(Buffer, lsp_offset, TheLine, Char, Offset).
 
 step_count(Severity, State) :-
     arg(Severity, State, C0),
     C is C0+1,
     nb_setarg(Severity, State, C).
+
+lsp_clear_diagnostics(Buffer, Region:lsp_region_fragment*) :->
+    "Remove emacs_lsp_diagnostic fragments [in region]"::
+    (   Region == @nil
+    ->  send(Buffer, for_all_fragments,
+             if(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                message(@arg1, free)))
+    ;   send(Buffer, for_all_fragments,
+             if(and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                    message(@arg1, overlap, Region)),
+                message(@arg1, free)))
+    ).
+
 
 suppressed(Buffer, LSP, StartOffset, Length, Diagnostic) :-
     get(LSP, config, Config),
@@ -280,6 +312,66 @@ fixes(F, Fixes:prolog) :<-
                context: Context
              }),
         Fixes).
+
+:- pce_end_class.
+
+
+:- pce_begin_class(lsp_region_fragment, fragment,
+                   "Used to mark region for an LSP to work on").
+
+variable(uri,	     name,       get, "Region URI").
+variable(lsp_client, lsp_client, get, "LSP we are connected to").
+variable(file,	     file,       get, "(Tmp) file connected").
+
+initialise(Region, TB:emacs_buffer, LSP:lsp_client) :->
+    send_super(Region, initialise, TB, 0, 0, lsp_region),
+    get(TB, attribute, lsp_tracking, DocumentURI),
+    file_name_extension(_, Ext, DocumentURI),
+    tmp_file_stream(TmpFile, Stream,
+                    [ encoding(utf8),
+                      extension(Ext)
+                    ]),
+    close(Stream),
+    uri_file_name(RegionURI, TmpFile),
+    send(Region, slot, uri,        RegionURI),
+    send(Region, slot, lsp_client, LSP),
+    send(Region, slot, file,       TmpFile),
+    get(TB, mode, Mode),
+    send(LSP, notify,
+         'textDocument/didOpen'(
+             #{textDocument:
+                 #{ uri: RegionURI,
+                    languageId: Mode,
+                    version: 1,
+                    text: ""
+                  }
+              })),
+    debug(vale(region), 'Established region using ~q', [TmpFile]).
+
+range(Region, Start:start=int, End:end=int) :->
+    "Set extends"::
+    send(Region, start, Start, @off),
+    send(Region, end, End).
+
+did_save(Region) :->
+    "Save content to file and notify LSP using didSave()"::
+    get(Region, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, DocumentURI),
+    get(Region, string, string(Text)),
+    get(Region, start, Start),
+    get(Region, end, End),
+    send(TB, do_save, Region?file, Start, End),
+    get(Region, uri, RegionURI),
+    debug(vale(region), 'Using didSave to check ~d..~d',
+          [Start, End]),
+    lsp_set_document_region(RegionURI, DocumentURI, Region),
+    send(Region?lsp_client, notify,
+         'textDocument/didSave'(
+             #{ textDocument:
+                  #{ uri: RegionURI
+                   },
+                text: Text
+              })).
 
 :- pce_end_class.
 

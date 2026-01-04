@@ -34,7 +34,8 @@
           [ ensure_lsp_server/4,     % +Buffer, +File, +Mode, -Sheet
             lsp_token_type/3,        % +LSP, ?TokenTypeNum, ?TokenTypeName
             lsp_client/2,            % ?LSPClientObj, ?Stream
-            lsp_mode_module/2
+            lsp_mode_module/2,
+            lsp_set_document_region/3 % +RegionURI, +DocumentURI, +LineOffset
           ]).
 :- use_module(library(pce)).
 :- use_module(library(process)).
@@ -530,6 +531,19 @@ execute_command(LSP, Command:command=prolog, Args:arguments=prolog) :->
              #{}
          }).
 
+:- dynamic
+    document_region/3.		% RegionURI, DocumentURI, LineOffset
+
+%!  lsp_set_document_region(+RegionURI, +DocumentURI, +Fragment)
+%
+%   Register that we use  RegionURI  to   represent  a  sub-document  of
+%   DocumentURI that starts at line LineOffset.  This feature is used to
+%   use LSPs that can only process whole documents to get diagnostics on
+%   a file region.
+
+lsp_set_document_region(RegionURI, DocumentURI, Fragment) :-
+    retractall(document_region(RegionURI, _, _)),
+    asserta(document_region(RegionURI, DocumentURI, Fragment)).
 
 %!  lsp_calling(-LSP) is det.
 %
@@ -540,7 +554,17 @@ lsp_calling(LSP) :-
     nb_current(json_rpc_stream, Stream),
     lsp_client(LSP, Stream).
 
-uri_buffer(URIs, Buffer) :-
+%!  uri_buffer(+URI:string, -Buffer:emacs_buffer,
+%!             -Region:lsp_region_fragment*)
+%
+%   True when Buffer is the PceEmacs buffer associated with URI.
+
+uri_buffer(URIs, Buffer, Region) :-
+    atom_string(RegionURI, URIs),
+    document_region(RegionURI, DocumentURI, Region),
+    !,
+    uri_buffer(DocumentURI, Buffer, _).
+uri_buffer(URIs, Buffer, @nil) :-
     uri_file_name(URIs, File),
     get(@emacs, file_buffer, File, Buffer),
     get(Buffer, attribute, lsp_tracking, URI),
@@ -558,9 +582,9 @@ uri_buffer(URIs, Buffer) :-
     ),
     lsp_calling(LSP),
     #{ uri:URI, diagnostics: Diagnostics } :< Data,
-    uri_buffer(URI, Buffer),
+    uri_buffer(URI, Buffer, Region),
     !,
-    send(Buffer, lsp_publish_diagnostics, LSP, Diagnostics).
+    send(Buffer, lsp_publish_diagnostics, LSP, Diagnostics, Region).
 'textDocument/publishDiagnostics'(_).
 
 %!  'workspace/configuration'(+Data, -Result) is det.
@@ -654,7 +678,7 @@ is_change(Change) :-
 %   Pair is `URI-ChangeSet`, representing the changes for URI.
 
 apply_edit(FileURI-Changes) :-
-    uri_buffer(FileURI, Buffer),
+    uri_buffer(FileURI, Buffer, _),
     apply_buffer_changes(Buffer, Changes).
 apply_edit(FileURI-Changes) :-
     uri_file_name(FileURI, File),

@@ -45,30 +45,61 @@ diagnostics, we need:
 
   1. Save the file in the designated URI
   2. Call textDocument/didSave() providing the (same) full text.
+
+Unfortunately,  `vale`  is  rather  slow  and   can  only  analyse  full
+documents. To implement quick  local  checking,   we  must  associate  a
+temporary file and use that with didOpen(), didSave(), etc.
 */
 
 :- emacs_extend_mode(language, []).
+
+%   ->vale_check_region(Start, View)
+%
+%   Check the region Start..Start+View, rounded   outwards to lines. The
+%   defaults are the currently visible area.
+
+vale_check_region(M, Start:start=['0..'], View:view=['0..']) :->
+    get(M, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, _DocumentURI),
+    get(M, image, TI),
+    (   Start == @default
+    ->  get(TI, start, StartPos)
+    ;   StartPos = Start
+    ),
+    (   View == @default
+    ->  get(TI, view, ViewLen)
+    ;   ViewLen = View
+    ),
+    get(TB, scan, StartPos,         line, 0, start, SOL),
+    get(TB, scan, StartPos+ViewLen, line, 0, end,   EOL),
+    get(M, vale_region_lsp, Region),
+    send(Region, range, SOL, EOL),
+    send(Region, did_save).
+
+%   <-vale_region_lsp() -> sheet
+%
+%   Get the existing or  extablish  a   new  document  for  processing a
+%   region.
+
+vale_region_lsp(M, Region:lsp_region_fragment) :<-
+    "Establish a vale LSP for the region"::
+    get(M, text_buffer, TB),
+    (   get(TB, attribute, vale_region_lsp, Region)
+    ->  true
+    ;   get(M, lsp_client, diagnostics, LSP),
+        new(Region, lsp_region_fragment(TB, LSP)),
+        send(TB, attribute, vale_region_lsp, Region)
+    ).
 
 vale_check(M) :->
     "Run spell checking using vale-ls"::
     (   get(M, text_buffer, TB),
         get(TB, attribute, lsp_tracking, URI),
         get(M, lsp_client, diagnostics, LSP),
-        pp([M,TB,LSP]),
         get(LSP, initialized, @on)
     ->  send(M, report, status, 'Checking ...'),
         get(TB, contents, string(Content)),
-        string_length(Content, Len),
-        format("~p: sending ~D characters~n", [M, Len]),
-        uri_file_name(URI, File),
-        (   fail
-        ->  format(string(Cmd), 'touch "~w"', [File]),
-            shell(Cmd)
-        ;   setup_call_cleanup(
-                open(File, write, Out),
-                format(Out, '~s', [Content]),
-                close(Out))
-        ),
+        send(TB, do_save, TB?file, 0),
         send(LSP, notify,
              'textDocument/didSave'(
                  #{ textDocument:
@@ -76,7 +107,7 @@ vale_check(M) :->
                        },
                     text: Content
                   }))
-    ;   true
+    ;   send(M, report, warning, 'Cannot spell-check using vale-ls')
     ).
 
 :- emacs_end_mode.
