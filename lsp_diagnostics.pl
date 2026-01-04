@@ -674,8 +674,8 @@ same_diagnostics(To, List) :-
     same_diagnostics(Start, Text, Source, Code, List).
 
 same_diagnostics(Frag, Text, Source, Code, List) :-
-    send(Frag, instance_of, emacs_lsp_diagnostic),
-    (   send(Frag?string, equal, Text),
+    (   send(Frag, instance_of, emacs_lsp_diagnostic),
+        send(Frag?string, equal, Text),
         get(Frag, source, Source),
         get(Frag, code, Code)
     ->  List = [Frag|Tail]
