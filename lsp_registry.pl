@@ -65,7 +65,7 @@ lsp_server('vale-ls', Root,
               modes:      [markdown,latex,html],
               change:     1,             % only full changes
               spelling:
-                #{ code: 'Vale.Spelling',
+                #{ codes: ['Vale.Spelling', 'Vale.Terms' ],
                    dictionary: '~/.local/share/vale/styles/config/vocabularies/Project/accept.txt'
                  }
             }) :-

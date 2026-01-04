@@ -234,8 +234,9 @@ lsp_clear_diagnostics(Buffer, Region:lsp_region_fragment*) :->
 
 suppressed(Buffer, LSP, StartOffset, Length, Diagnostic) :-
     get(LSP, config, Config),
-    SpellingCode = Config.get(spelling).get(code),
+    SpellingCodes = Config.get(spelling).get(codes),
     atom_string(SpellingCode, Diagnostic.get(code)),
+    memberchk(SpellingCode, SpellingCodes),
     get(Buffer, contents, StartOffset, Length, string(String)),
     atom_string(Word, String),
     session_dictionary(Word).
@@ -299,6 +300,8 @@ fixes(F, Fixes:prolog) :<-
     get(F, text_buffer, Buffer),
     get(Buffer, attribute, lsp_tracking, URI),
     get(F, json, Diagnostic),
+    debug(lsp(code_action), 'Requesting code actions for ~@',
+          [print_term(Diagnostic, [output(current_output)])]),
     get(F, lsp_client, LSP),
     Context0 = #{ diagnostics: [Diagnostic] },
     (   get(LSP, code_action_kinds, Kinds)
@@ -311,7 +314,9 @@ fixes(F, Fixes:prolog) :<-
                range: Diagnostic.range,
                context: Context
              }),
-        Fixes).
+        Fixes),
+    debug(lsp(code_action), 'Code actions: ~@',
+          [print_term(Fixes, [output(current_output)])]).
 
 :- pce_end_class.
 
@@ -459,17 +464,18 @@ append_pars([H|T], PB) =>
 fixes_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     "Add buttons for available fixes"::
     get(Fragment, fixes, Fixes),
-    (   Fixes == []
+    (   Fixes == [], fail
     ->  true
     ;   get(Fragment, range, Range),
         same_diagnostics(Fragment, All),
+        get(Fragment, string, string(Text)),
         length(All, Count),
         get(W, member, message, MsgGroup),
         send(MsgGroup, append,
              new(Group, dialog_group(buttons, group)),
              next_row),
         (   member(Fix, Fixes),
-            append_fix_button(W, Group, Range, Count, Fix),
+            append_fix_button(W, Group, Range, Text, Count, Fix),
             fail
         ;   true
         ),
@@ -490,7 +496,7 @@ action_button(W, Icon:image, Title:char_array, Msg:code) :->
     send(LBL, reference, point(0, B?reference?y)),
     send(B, alignment, left).
 
-append_fix_button(W, Group, Range, Count, Fix),
+append_fix_button(W, Group, Range, Text, Count, Fix),
     fix_command(Fix, Range, Title, Command, Args, Kind) =>
     debug(lsp(fix), "Fix: ~@",
           [print_term(Fix, [output(current_output)])]),
@@ -498,21 +504,32 @@ append_fix_button(W, Group, Range, Count, Fix),
     send(W, action_button,
          image(Icon), Title,
          message(W, apply_change, Title)),
-    add_replace_all(Count, Command, Args, W, Group).
-append_fix_button(_W, _Group, _Range, _Count, Fix) =>
+    add_replace_all(Count, Command, Args, Text, W, Group).
+append_fix_button(_W, _Group, _Range, _Text, _Count, Fix) =>
     debug(lsp(unknown_fix), "Unknown fix: ~@",
           [print_term(Fix, [output(current_output)])]).
 
-add_replace_all(1, _, _, _, _) :-
+%!  add_replace_all(+Count, +Command, +Args, +OrgText, +Windog, +Group)
+%
+%   Add a replace all button if
+%
+%     - There are more than one equivalent changes
+%     - The command just edits the range
+%     - It is not a case-change.
+
+add_replace_all(1, _, _, _, _, _) :-
     !.
-add_replace_all(N, "pce_emacs.edit", replace(With), W, Group) :-
+add_replace_all(N, "pce_emacs.edit", replace(With), Text, W, Group) :-
+    \+ ( string_lower(With, Lower),
+         string_lower(Text, Lower)
+       ),
     !,
     format(string(Label), 'Replace all ~D occurrences', [N]),
     send(Group, append,
          new(B, button(Label, message(W, replace_all, With))),
          right),
     send(B, alignment, column).
-add_replace_all(_, _, _, _, _).
+add_replace_all(_, _, _, _, _, _).
 
 %!  fix_command(+CodeAction, +Range, -Title, -Command, -Args, -Kind) is
 %!              semidet.
@@ -623,7 +640,7 @@ add_dictionary_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     get(Fragment, code, Code),
     get(Fragment, lsp_client, LSP),
     get(LSP, config, Dict),
-    Code == Dict.get(spelling).get(code),
+    memberchk(Code, Dict.get(spelling).get(codes)),
     get(Fragment?string, value, Word),
     send(W, action_button, image('64x64/dictionary.png'),
          'Accept (session)', message(W, accept, Word, session)),
