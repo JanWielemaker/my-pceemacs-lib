@@ -169,33 +169,10 @@ lsp_publish_diagnostics(Buffer, LSP:lsp=lsp_client,
         get(Buffer, line_number, Start, Line1),
         LineOffset is Line1-1
     ),
-    State = counts(0,0,0,0),
-    maplist(show_diagnostic(Buffer, LSP, State, LineOffset),
-            Diagnostics),
-    report_diagnostic_counts(State, Buffer),
-    debug(lsp(diagnostics), 'Counts: ~p', [State]).
+    maplist(show_diagnostic(Buffer, LSP, LineOffset), Diagnostics),
+    send(Buffer, report_diagnostic_counts).
 
-%!  report_diagnostic_counts(+Counts, +Buffer) is det.
-%
-%   Report diagnostic message count if there are diagnostics.
-%
-%   @tbd: If we just did a region, should we report for the entire file?
-
-report_diagnostic_counts(Counts, Buffer) :-
-    (   Counts == counts(0,0,0,0)
-    ->  true
-    ;   send(Buffer?editors, for_all,
-             message(@arg1, lsp_enable_margin, @on)),
-        Counts = counts(E,W,I,H),
-        (   E == 0
-        ->  Level = status
-        ;   Level = warning
-        ),
-        send(Buffer, report, Level,
-             'E:%d, W:%d, I:%d, H:%d', E,W,I,H)
-    ).
-
-show_diagnostic(Buffer, LSP, State, LineOffset, Diagnostic) :-
+show_diagnostic(Buffer, LSP, LineOffset, Diagnostic) :-
     #{range: Range, severity: Severity} :< Diagnostic,
     #{start: Start, end: End} :< Range,
     lsp_offset(Start, Buffer, LineOffset, StartOffset),
@@ -204,7 +181,6 @@ show_diagnostic(Buffer, LSP, State, LineOffset, Diagnostic) :-
     (   suppressed(Buffer, LSP, StartOffset, Length, Diagnostic)
     ->  true
     ;   lsp_severity_type(Severity, _Name, Style),
-        step_count(Severity, State),
         new(D, emacs_lsp_diagnostic(Buffer, StartOffset, Length,
                                     Diagnostic, Style)),
         send(D, slot, lsp_client, LSP)
@@ -214,10 +190,34 @@ lsp_offset(#{line:Line, character:Char}, Buffer, LineOffset, Offset) =>
     TheLine is Line+LineOffset,
     get(Buffer, lsp_offset, TheLine, Char, Offset).
 
-step_count(Severity, State) :-
-    arg(Severity, State, C0),
-    C is C0+1,
-    nb_setarg(Severity, State, C).
+%   ->report_diagnostic_counts() is det.
+%
+%   Report diagnostic message count if there are diagnostics.
+
+report_diagnostic_counts(Buffer) :->
+    "Report on the number of diagnostics"::
+    new(Counts, sheet(attribute(lsp_diag_error,   number(0)),
+                      attribute(lsp_diag_warning, number(0)),
+                      attribute(lsp_diag_info,    number(0)),
+                      attribute(lsp_diag_hint,    number(0)))),
+    send(Buffer, for_all_fragments,
+         if(message(@arg1, instance_of, emacs_lsp_diagnostic),
+            message(Counts?(@arg1?style), plus, 1))),
+    get(Counts?lsp_diag_error,   value, E),
+    get(Counts?lsp_diag_warning, value, W),
+    get(Counts?lsp_diag_info,    value, I),
+    get(Counts?lsp_diag_hint,    value, H),
+    (   counts(E,W,I,H) == counts(0,0,0,0)
+    ->  true
+    ;   send(Buffer?editors, for_all,
+             message(@arg1, lsp_enable_margin, @on)),
+        (   E == 0
+        ->  Level = status
+        ;   Level = warning
+        ),
+        send(Buffer, report, Level,
+             'E:%d, W:%d, I:%d, H:%d', E,W,I,H)
+    ).
 
 lsp_clear_diagnostics(Buffer, Region:lsp_region_fragment*) :->
     "Remove emacs_lsp_diagnostic fragments [in region]"::
