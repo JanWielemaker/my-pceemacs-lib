@@ -41,6 +41,7 @@
 :- use_module(lsp_highlight).
 :- use_module(lsp_diagnostics).
 :- use_module(lsp_symbol_item).
+:- use_module(vale).
 
 /** <module> A PceEmacs C mode based on the `clangd` LSP
 
