@@ -162,7 +162,7 @@ lsp_publish_diagnostics(Buffer, LSP:lsp=lsp_client,
                         Diagnostics:diagnostics=prolog,
                         Region:lsp_region_fragment*) :->
     "Create fragments from diagnostics"::
-    send(Buffer, lsp_clear_diagnostics, Region),
+    send(Buffer, lsp_clear_diagnostics, LSP, Region),
     (   Region == @nil
     ->  LineOffset = 0
     ;   get(Region, start, Start),
@@ -219,14 +219,17 @@ report_diagnostic_counts(Buffer) :->
              'E:%d, W:%d, I:%d, H:%d', E,W,I,H)
     ).
 
-lsp_clear_diagnostics(Buffer, Region:lsp_region_fragment*) :->
-    "Remove emacs_lsp_diagnostic fragments [in region]"::
+lsp_clear_diagnostics(Buffer,
+                      LSP:lsp_client, Region:lsp_region_fragment*) :->
+    "Remove emacs_lsp_diagnostic fragments from client [in region]"::
     (   Region == @nil
     ->  send(Buffer, for_all_fragments,
-             if(message(@arg1, instance_of, emacs_lsp_diagnostic),
+             if(and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                    @arg1?lsp_client == LSP),
                 message(@arg1, free)))
     ;   send(Buffer, for_all_fragments,
              if(and(message(@arg1, instance_of, emacs_lsp_diagnostic),
+                    @arg1?lsp_client == LSP,
                     message(@arg1, overlap, Region)),
                 message(@arg1, free)))
     ).
