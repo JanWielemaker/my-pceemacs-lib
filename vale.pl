@@ -60,7 +60,7 @@ temporary file and use that with didOpen(), didSave(), etc.
 
 vale_check_region(M, Start:start=['0..'], View:view=['0..']) :->
     get(M, text_buffer, TB),
-    get(TB, attribute, lsp_tracking, _DocumentURI),
+    get(M, lsp_client, diagnostics, LSP),
     get(M, image, TI),
     (   Start == @default
     ->  get(TI, start, StartPos)
@@ -72,24 +72,9 @@ vale_check_region(M, Start:start=['0..'], View:view=['0..']) :->
     ),
     get(TB, scan, StartPos,         line, 0, start, SOL),
     get(TB, scan, StartPos+ViewLen, line, 0, end,   EOL),
-    get(M, vale_region_lsp, Region),
+    get(TB, region_lsp, LSP, Region),
     send(Region, range, SOL, EOL),
     send(Region, did_save).
-
-%   <-vale_region_lsp() -> sheet
-%
-%   Get the existing or  extablish  a   new  document  for  processing a
-%   region.
-
-vale_region_lsp(M, Region:lsp_region_fragment) :<-
-    "Establish a vale LSP for the region"::
-    get(M, text_buffer, TB),
-    (   get(TB, attribute, vale_region_lsp, Region)
-    ->  true
-    ;   get(M, lsp_client, diagnostics, LSP),
-        new(Region, lsp_region_fragment(TB, LSP)),
-        send(TB, attribute, vale_region_lsp, Region)
-    ).
 
 vale_check(M) :->
     "Run spell checking using vale-ls"::

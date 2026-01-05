@@ -35,7 +35,8 @@
             lsp_token_type/3,        % +LSP, ?TokenTypeNum, ?TokenTypeName
             lsp_client/2,            % ?LSPClientObj, ?Stream
             lsp_mode_module/2,
-            lsp_set_document_region/3 % +RegionURI, +DocumentURI, +LineOffset
+            lsp_set_document_region/3, % +RegionURI, +DocumentURI, +LineOffset
+            lsp_delete_document_region/1 % +RegionURI
           ]).
 :- use_module(library(pce)).
 :- use_module(library(process)).
@@ -544,6 +545,13 @@ execute_command(LSP, Command:command=prolog, Args:arguments=prolog) :->
 lsp_set_document_region(RegionURI, DocumentURI, Fragment) :-
     retractall(document_region(RegionURI, _, _)),
     asserta(document_region(RegionURI, DocumentURI, Fragment)).
+
+%!  lsp_delete_document_region(+RegionURI) is det.
+%
+%   Unregister the region.
+
+lsp_delete_document_region(RegionURI) :-
+    retractall(document_region(RegionURI, _, _)).
 
 %!  lsp_calling(-LSP) is det.
 %

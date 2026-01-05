@@ -231,6 +231,13 @@ lsp_clear_diagnostics(Buffer, Region:lsp_region_fragment*) :->
                 message(@arg1, free)))
     ).
 
+region_lsp(TB, LSP:lsp_client, Region:lsp_region_fragment) :<-
+    "Establish an LSP for a region"::
+    (   get(TB, attribute, region_lsp, Region)
+    ->  true
+    ;   new(Region, lsp_region_fragment(TB, LSP)),
+        send(TB, attribute, region_lsp, Region)
+    ).
 
 suppressed(Buffer, LSP, StartOffset, Length, Diagnostic) :-
     get(LSP, config, Config),
@@ -352,6 +359,14 @@ initialise(Region, TB:emacs_buffer, LSP:lsp_client) :->
                   }
               })),
     debug(vale(region), 'Established region using ~q', [TmpFile]).
+
+unlink(Region) :->
+    "Cleanup registration"::
+    get(Region, text_buffer, TB),
+    ignore(send(TB, delete_attribute, region_lsp)),
+    get(Region, uri, RegionURI),
+    lsp_delete_document_region(RegionURI),
+    send_super(Region, unlink).
 
 range(Region, Start:start=int, End:end=int) :->
     "Set extends"::
