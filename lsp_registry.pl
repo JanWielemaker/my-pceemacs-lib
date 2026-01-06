@@ -62,7 +62,7 @@ lsp_server(clangd, Root,
 lsp_server('vale-ls', Root,
            #{ executable: path('vale-ls'),
               arguments:  Argv,
-              modes:      [markdown,latex,html,c],
+              modes:      [markdown,latex,html,c,prolog],
               change:     1,             % only full changes
               spelling:
                 #{ codes: ['Vale.Spelling', 'Vale.Terms' ],

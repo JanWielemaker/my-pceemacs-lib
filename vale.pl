@@ -34,6 +34,8 @@
           []).
 :- use_module(library(pce)).
 
+:- use_module(lsp_highlight).
+
 /** <module> Vale extension
 
 This module provides methods for   integrating `vale` through `vale-ls`.

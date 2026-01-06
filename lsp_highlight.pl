@@ -154,11 +154,11 @@ lsp_setup_highlight(M) :->
     "Prepare using an LSP on this mode"::
     (   styled_role(Role),
         get(M, lsp_client, Role, _)
-    ->  send(M, setup_styles)
+    ->  send(M, lsp_setup_styles)
     ;   send(M, lsp_setup),
         styled_role(Role),
         get(M, lsp_client, Role, _),
-        send(M, setup_styles),
+        send(M, lsp_setup_styles),
         % needs to be called in next event cycle
         new(T, timer(0.1,
                      and(message(M, colourise_buffer),
@@ -170,15 +170,15 @@ lsp_setup_highlight(M) :->
 styled_role(highlight).
 styled_role(diagnostics).
 
-setup_styles(M) :->
+lsp_setup_styles(M) :->
     "Initialize the editor style sheet"::
     get(M, editor, E),
-    (   get(E, attribute, styles_assigned, @on)
+    (   get(E, attribute, lsp_styles_assigned, @on)
     ->  true
     ;   get(M, name, ModeName),
         forall(style(ModeName, _Class, Name, Style),
                send(E, style, Name, Style)),
-        send(E, attribute, styles_assigned, @on)
+        send(E, attribute, lsp_styles_assigned, @on)
     ),
     send(M, lsp_enable_margin).
 

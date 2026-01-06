@@ -563,7 +563,7 @@ lsp_calling(LSP) :-
     lsp_client(LSP, Stream).
 
 %!  uri_buffer(+URI:string, -Buffer:emacs_buffer,
-%!             -Region:lsp_region_fragment*)
+%!             -Region:lsp_region_fragment)
 %
 %   True when Buffer is the PceEmacs buffer associated with URI.
 
@@ -742,7 +742,7 @@ lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
 
 :- det('window/logMessage'/1).
 'window/logMessage'(Data) :-
-    #{type: Type,		% 1: error, 2: warnig, 3:info, 4: log
+    #{type: Type,		% 1: error, 2: warning, 3:info, 4: log
       message: Message} :< Data,
     message_level(Type, Kind),
     print_message(Kind, lsp(log(Message))).

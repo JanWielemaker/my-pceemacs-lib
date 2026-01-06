@@ -4,7 +4,6 @@
 :- use_module(library(debug)).
 
 :- use_module(lsp_diagnostics).
-:- use_module(lsp_highlight).
 :- use_module(vale).
 
 %:- debug(lsp(workspace)).
