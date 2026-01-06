@@ -236,10 +236,10 @@ lsp_clear_diagnostics(Buffer,
 
 region_lsp(TB, LSP:lsp_client, Region:lsp_region_fragment) :<-
     "Establish an LSP for a region"::
-    (   get(TB, attribute, region_lsp, Region)
+    (   get(TB, attribute, att_region_lsp, Region)
     ->  true
     ;   new(Region, lsp_region_fragment(TB, LSP)),
-        send(TB, attribute, region_lsp, Region)
+        send(TB, attribute, att_region_lsp, Region)
     ).
 
 suppressed(Buffer, LSP, StartOffset, Length, Diagnostic) :-
@@ -366,7 +366,7 @@ initialise(Region, TB:emacs_buffer, LSP:lsp_client) :->
 unlink(Region) :->
     "Cleanup registration"::
     get(Region, text_buffer, TB),
-    ignore(send(TB, delete_attribute, region_lsp)),
+    ignore(send(TB, delete_attribute, att_region_lsp)),
     get(Region, uri, RegionURI),
     lsp_delete_document_region(RegionURI),
     send_super(Region, unlink).
