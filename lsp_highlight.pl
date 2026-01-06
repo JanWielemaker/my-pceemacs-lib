@@ -30,11 +30,9 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-:- module(lsp_highlight,
-          []).
+:- module(lsp_highlight, []).
 :- use_module(library(pce)).
 :- use_module(library(apply)).
-:- use_module(library(broadcast)).
 :- use_module(library(debug)).
 
 :- use_module(lsp_client).
