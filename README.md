@@ -1,7 +1,7 @@
-# Extending the SWI-Prolog built-in editor pceEmacs
+# Extending the SWI-Prolog built-in editor PceEmacs
 
 This directory holds some  examples  for   extending  various  modes  in
-pceEmacs. Install this directory  as   `xpce/emacs`  in  the SWI-Prologs
+PceEmacs. Install this directory  as   `xpce/emacs`  in  the SWI-Prologs
 configuration directory. On a UNIX system by using XDG, this means
 
 ```
@@ -12,6 +12,26 @@ git clone https://github.com/JanWielemaker/my-pceemacs-lib.git emacs
 ```
 
 ## Using LSP (Language Server Protocol)
+
+This repository implements a prototype integration   of LSP servers into
+PceEmacs.  Notes:
+
+  - Requires SWI-Prolog 10.1.2 or the git version
+  - Eventually, most of this will probably be moved into PceEmacs itself.
+    as is, there are some pending design issues.  Notably:
+    - How must an LSP be connected to a mode?  As is, methods on the mode
+      need to be redefined to call the LSP.
+    - How to fallback if the desired LSP does not exist?
+
+
+### Using clangd
+
+The program `clangd` is a comprehensive LSP  for C and C++. Currently it
+is used to:
+
+  - Offer syntax highlighting
+  - Implement find-definition and find-references
+  - Show the `clangd` diagnostics in the margin.
 
 ### Using Vale-ls
 
@@ -24,20 +44,15 @@ this repository integrates Vale for these modes:
   - Markdown
   - LaTeX
   - C
+  - Prolog
 
-Vale supports programming languages, by  default scanning comments only.
-Ideally, we want to add Prolog. This is not so easy though, as Vale does
-not allow defining the comment syntax. To do   so, we need to add Prolog
-as a supported language, which implies  adding a tree-sitter grammar for
-it.   Tree sitter grammars exist for Prolog:
+The Prolog support uses a modified version of `vale`.  This version
+can be built from the following sources:
 
-  - https://github.com/Rukiza/tree-sitter-prolog
-  - https://github.com/gruhn/tree-sitter-prolog
-    (fork of above)
-  - https://codeberg.org/foxy/tree-sitter-prolog
-    (JavaScript)
-  - https://github.com/jamesnvc/tree-sitter-prolog
-    (JavaScript)
-  - https://github.com/foxyseta/tree-sitter-prolog
-    (C after all?)
-  - https://github.com/Desdaemon/tree-sitter-prolog (3 years)
+  - https://github.com/JanWielemaker/vale
+    Using branch `prolog`.
+  - https://github.com/JanWielemaker/go-tree-sitter
+    Using branch `prolog`.
+
+Clone both repositories in the same   parent directory, install `golang`
+and run `make` in the `vale` directory to create `bin/vale`.
