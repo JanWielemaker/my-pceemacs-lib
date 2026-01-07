@@ -753,7 +753,7 @@ lsp_offset(#{line:Line, character:Char}, Buffer, Offset) =>
 
 :- det('window/showMessage'/1).
 'window/showMessage'(Data) :-
-    #{type: Type,		% 1: error, 2: warnig, 3:info, 4: log
+    #{type: Type,		% 1: error, 2: warning, 3:info, 4: log
       message: Message} :< Data,
     message_level(Type, Kind),
     print_message(Kind, lsp(show(Message))).
