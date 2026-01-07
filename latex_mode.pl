@@ -62,7 +62,7 @@ emacs_latex_mode:lsp_configuration(Item, Config) :-
 class_variable(auto_colourise_size_limit, int, 400000).
 class_variable(idle_timeout,              num, 0.3).
 class_variable(lsp_roles,		  sheet*,
-               sheet(attribute(diagnostics, 'vale-ls'))).
+               sheet(attribute(spelling, 'vale-ls'))).
 
 colourise_buffer(M) :->
     "Do spell checking"::

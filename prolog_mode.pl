@@ -65,7 +65,7 @@ style(Diagnostic,      Properties) :-
 		     ]).
 
 class_variable(lsp_roles, sheet*,
-               sheet(attribute(diagnostics, 'vale-ls'))).
+               sheet(attribute(spelling, 'vale-ls'))).
 
 setup_mode(M) :->
 	"Setup Prolog and Vale"::

@@ -62,7 +62,7 @@ temporary file and use that with didOpen(), didSave(), etc.
 
 vale_check_region(M, Start:start=['0..'], View:view=['0..']) :->
     get(M, text_buffer, TB),
-    get(M, lsp_client, diagnostics, LSP),
+    get(M, lsp_client, spelling, LSP),
     get(M, image, TI),
     (   Start == @default
     ->  get(TI, start, StartPos)
@@ -82,7 +82,7 @@ vale_check(M) :->
     "Run spell checking using vale-ls"::
     (   get(M, text_buffer, TB),
         get(TB, attribute, lsp_tracking, URI),
-        get(M, lsp_client, diagnostics, LSP),
+        get(M, lsp_client, spelling, LSP),
         get(LSP, initialized, @on)
     ->  send(M, report, status, 'Checking ...'),
         get(TB, contents, string(Content)),

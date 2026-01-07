@@ -168,7 +168,7 @@ lsp_setup_highlight(M) :->
     ).
 
 styled_role(highlight).
-styled_role(diagnostics).
+styled_role(spelling).
 
 lsp_setup_styles(M) :->
     "Initialize the editor style sheet"::
