@@ -170,17 +170,28 @@ lsp_create_client(WS, Mode, Id, LSP) :-
     get(WS?root, path, Root),
     lsp_server(Id, Root, Config),
     memberchk(Mode, Config.modes),
-    new(LSP, lsp_client(Id, WS,
-                        Config.executable,
-                        Config.get(arguments,[]))),
-    forall(lsp_configure(LSP, Config), true),
-    send(LSP, mode, Mode),
-    send(LSP, start).
+    (   get(WS, lsp_client, Id, LSP)
+    ->  true
+    ;   new(LSP, lsp_client(Id, WS,
+                            Config.executable,
+                            Config.get(arguments,[]))),
+        forall(lsp_configure(LSP, Config), true),
+        send(LSP, mode, Mode),
+        send(LSP, start)
+    ).
 
 lsp_configure(LSP, Config) :-
     send(LSP, slot, config, Config).
 lsp_configure(LSP, Config) :-
     send(LSP, slot, change, Config.get(change)).
+
+lsp_client(WS, Id:id=name, Client:lsp_client) :<-
+    "Find client from id"::
+    get(WS, slot, lsp_clients, ModeSheet),          % Mode -> Sheet
+    get_chain(ModeSheet, members, Attributes),
+    member(Att, Attributes),
+    get(Att, value, ClientSheet),                   % Id -> lsp_client
+    get(ClientSheet, value, Id, Client).
 
 :- pce_end_class.
 
