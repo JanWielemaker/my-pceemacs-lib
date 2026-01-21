@@ -212,7 +212,7 @@ disconnect_lsps :-
     forall(retract(lsp_client(LSP, _Stream)),
            send(LSP, free)).
 
-:- pce_begin_class(lsp_client, object,
+:- pce_begin_class(lsp_client(id), object,
                    "Connect to an LSP server").
 
 variable(id,		name,          get,  "LSP identifier").
@@ -293,25 +293,37 @@ call(LSP, Message:message=prolog, Options:options=[prolog],
      Result:prolog) :<-
     "Make a JSON RPC call"::
     default(Options, [], TheOptions),
+    (   (   get(LSP, initialized, @on)
+        ;   Message = initialize(_)
+        )
+    ->  true
+    ;   debug(lsp(init), "Before initialized: calling ~p", [Message])
+    ),
     get(LSP, connection, Stream),
     catch(json_call(Stream, Message, Result,
                     [ header(true)
                     | TheOptions
                     ]),
           Error,
-          rpc_error(Error)).
+          rpc_error(Message, Error)).
 
 notify(LSP, Message:message=prolog) :->
     "Send a JSON RPC notification"::
+    (   (   get(LSP, initialized, @on)
+        ;   Message = initialized(_)
+        )
+    ->  true
+    ;   debug(lsp(init), "Before initialized: notifying ~p", [Message])
+    ),
     get(LSP, connection, Stream),
     catch(json_notify(Stream, Message,
                       [ header(true)
                       ]),
           Error,
-          rpc_error(Error)).
+          rpc_error(Message, Error)).
 
-rpc_error(Error) :-
-    print_message(error, Error),
+rpc_error(Message, Error) :-
+    print_message(error, lsp(rpc_error(Message, Error))),
     fail.
 
 init(LSP) :->
@@ -442,7 +454,8 @@ did_open(LSP, Buffer:emacs_buffer) :->
     (   get(LSP, initialized, @on)
     ->  send(LSP, notify_did_open, Buffer)
     ;   send(LSP, register_pending,
-             message(LSP, notify_did_open, Buffer))
+             and(message(LSP, notify_did_open, Buffer),
+                 message(Buffer, colourise)))
     ).
 
 register_pending(LSP, Message:code) :->
@@ -464,10 +477,14 @@ send_pending_actions(LSP) :->
 
 notify_did_open(LSP, Buffer:emacs_buffer) :->
     "Send textDocument/didOpen()"::
-    get(Buffer, contents, string(Content)),
-    get(Buffer, attribute, lsp_version, Version),
     get(Buffer, attribute, lsp_tracking, URI),
+    get(Buffer, contents, string(Content)),
+    string_length(Content, ContentLength),
+    Version = 1,
+    send(Buffer, attribute, lsp_version, Version),
     get(Buffer, mode, Mode),
+    debug(lsp(file), 'Sending didOpen() for ~p ~p (~D chars)',
+          [Buffer, URI, ContentLength]),
     send(LSP, notify,
          'textDocument/didOpen'(
              #{textDocument:
@@ -798,7 +815,6 @@ lsp_event(opened(Buffer)) :-
     \+ send(Clients?members, empty),
     uri_file_name(URI, Path),
     debug(lsp(file), 'Opened ~p', [URI]),
-    send(Buffer, attribute, lsp_version, 1),
     send(Buffer, attribute, lsp_tracking, URI),
     send(Buffer, lsp_changes, @on),
     for_sheet(Clients,
@@ -1080,3 +1096,6 @@ lsp_message(log(Message)) -->
     [ '~s'-[Message] ].
 lsp_message(show(Message)) -->
     [ 'TODO: show ~s'-[Message] ].
+lsp_message(rpc_error(Message, Error)) -->
+    { message_to_string(Error, ErrorMsg) },
+    [ '~p: ~s'-[Message, ErrorMsg] ].

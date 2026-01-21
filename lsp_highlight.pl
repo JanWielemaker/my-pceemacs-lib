@@ -49,6 +49,13 @@ auto_colourise(TB) :->
     ;   true
     ).
 
+colourise(TB) :->
+    "Run mode ->colourise_buffer on associated mode"::
+    (   get(TB?editors, head, Editor)
+    ->  send(Editor?mode, colourise_buffer)
+    ;   true
+    ).
+
 %   ->lsp_highlight(+LSP)
 %
 %   Do LSP based highlighting. Asks  for   the  tokens and applies them.
@@ -57,6 +64,7 @@ lsp_highlight(TB, LSP:lsp_client) :->
     "Implement LSP based semantic highlighting"::
     get(LSP, initialized, @on),
     get(TB, attribute, lsp_tracking, URI),
+    get(TB, attribute, lsp_version, _Version),
     send(TB, report, progress, 'LSP highlighting'),
     get_time(LSPTime0),
     get(LSP, call,
