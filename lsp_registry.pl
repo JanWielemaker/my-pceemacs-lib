@@ -58,6 +58,7 @@ lsp_server(clangd, Root,
               arguments:  Argv,
               modes:      [c,cpp]
             }) :-
+    \+ current_prolog_flag(clangd, false),
     findall(Arg, lsp_argument(clangd, Root, Arg), Argv).
 lsp_server('vale-ls', Root,
            #{ executable: path('vale-ls'),
@@ -69,6 +70,7 @@ lsp_server('vale-ls', Root,
                    dictionary: '~/.local/share/vale/styles/config/vocabularies/Project/accept.txt'
                  }
             }) :-
+    current_prolog_flag(vale, true),
     findall(Arg, lsp_argument('vale-ls', Root, Arg), Argv).
 /*
 lsp_server('ltex-ls', Root,
