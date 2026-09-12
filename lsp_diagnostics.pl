@@ -414,7 +414,7 @@ class_variable(text_width, int, 400,
 initialise(W, Editor:editor, Fragment:emacs_lsp_diagnostic,
            Hover:[bool]) :->
     get(Fragment, start, Offset),
-    get(Editor, image, TextImage),
+    get(Editor, text_image, TextImage),
     get(TextImage, character_position, Offset, point(X,Y)),
     get(TextImage, frame_position, point(OX,OY)),
     get(Editor, frame, Master),
