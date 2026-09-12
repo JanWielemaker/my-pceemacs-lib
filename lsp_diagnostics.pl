@@ -209,14 +209,11 @@ report_diagnostic_counts(Buffer) :->
     get(Counts?lsp_diag_hint,    value, H),
     (   counts(E,W,I,H) == counts(0,0,0,0)
     ->  true
-    ;   send(Buffer?editors, for_all,
-             message(@arg1, lsp_enable_margin, @on)),
-        (   E == 0
-        ->  Level = status
-        ;   Level = warning
-        ),
-        send(Buffer, report, Level,
-             'E:%d, W:%d, I:%d, H:%d', E,W,I,H)
+    ;   in_pce_thread((
+            send(Buffer?editors, for_all,
+                 message(@arg1, lsp_enable_margin, @on)),
+            send(Buffer, report, status,
+                 'E:%d, W:%d, I:%d, H:%d', E,W,I,H)))
     ).
 
 lsp_clear_diagnostics(Buffer,
