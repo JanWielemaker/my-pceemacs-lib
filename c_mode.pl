@@ -156,11 +156,33 @@ find_definition(M) :->
     "LSP based find definition"::
     (   get(M, lsp_client, symbol, LSP)
     ->  (   send(M, on_symbol)
-        ->  send(M, find_symbol_at_caret, LSP)
+        ->  (   get(M, 'LD_symbol', LDSymbol)
+            ->  send(M, goto_symbol, LDSymbol)
+            ;   send(M, find_symbol_at_caret, LSP)
+            )
         ;   send(M, noarg_call, goto_symbol)
         )
     ;   send(M, noarg_call, find_tag)
     ).
+
+%!  <-'LD_symbol'
+%
+%   Deal with SWI-Prolog's LDFUNC macros, jumping to the actual function
+%   rather than the macro definition.
+
+'LD_symbol'(M, LDSymbol:lsp_tag) :<-
+    "Find a SWI-Prolog <Function>__LD symbol"::
+    get(M, lsp_client, symbol, LSP),
+    get(M, word, string(Symbol)),
+    atom_concat(Symbol, '___LD', LDSymbol),
+    get(LSP, call,
+        'workspace/symbol'(
+            #{ query: LDSymbol
+             }),
+        Result),
+    member(R, Result),
+    atom_string(LDSymbol, R.name),
+    !.
 
 find_symbol_at_caret(M, LSP) :->
     "Find definition from current location"::
