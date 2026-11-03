@@ -36,6 +36,35 @@
 
 :- use_module(lsp_highlight).
 
+:- multifile
+    lsp_registry:lsp_server/2,
+    lsp_registry:lsp_argument/3.
+
+%   LSP servers for prose.  vale-ls is used if the Prolog flag `vale`
+%   is `true`.
+
+lsp_registry:lsp_server('vale-ls',
+                        #{ executable: path('vale-ls'),
+                           modes:      [markdown,latex,html,c,prolog],
+                           roles:      [spelling],
+                           change:     1,             % only full changes
+                           spelling:
+                             #{ codes: ['Vale.Spelling', 'Vale.Terms' ],
+                                dictionary: '~/.local/share/vale/styles/config/vocabularies/Project/accept.txt'
+                              }
+                         }) :-
+    current_prolog_flag(vale, true).
+/*
+lsp_registry:lsp_server('ltex-ls',
+                        #{ executable: path('ltex-ls'),
+                           modes:      [markdown,latex,html]
+                         }).
+*/
+
+lsp_registry:lsp_argument('ltex-ls', _, Arg) :-
+    debugging(lsp(log('ltex-ls', File))),
+    format(atom(Arg), '--log-file=~w', [File]).
+
 /** <module> Vale extension
 
 This module provides methods for   integrating `vale` through `vale-ls`.

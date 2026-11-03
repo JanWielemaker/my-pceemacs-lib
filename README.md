@@ -13,15 +13,18 @@ git clone https://github.com/JanWielemaker/my-pceemacs-lib.git emacs
 
 ## Using LSP (Language Server Protocol)
 
-This repository implements a prototype integration   of LSP servers into
-PceEmacs.  Notes:
+The LSP client and the registry of LSP servers are part of PceEmacs
+(`library(emacs/lsp_client)` and `library(emacs/lsp_registry)`).  This
+repository adds the editor features on top of them, which are being
+moved into PceEmacs as well.  Notes:
 
-  - Requires SWI-Prolog 10.1.2 or the git version
-  - Eventually, most of this will probably be moved into PceEmacs itself.
-    as is, there are some pending design issues.  Notably:
-    - How must an LSP be connected to a mode?  As is, methods on the mode
-      need to be redefined to call the LSP.
-    - How to fallback if the desired LSP does not exist?
+  - Requires the git version of SWI-Prolog.
+  - Servers are registered using the multifile predicate
+    `lsp_registry:lsp_server/2`, which also tells which _roles_ a server
+    plays (e.g., `highlight`, `symbol`, `complete`, `spelling`).  A mode
+    asks for a server by role.  The class variable `lsp_roles` of a mode
+    overrules the registry.  PceEmacs registers `clangd`; `vale.pl`
+    registers `vale-ls`.
 
 
 ### Using clangd

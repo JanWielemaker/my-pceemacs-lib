@@ -35,7 +35,7 @@
 :- use_module(library(apply)).
 :- use_module(library(debug)).
 
-:- use_module(lsp_client).
+:- use_module(library(emacs/lsp_client)).
 
 /** <module> Generic LSP based highlighting
 */

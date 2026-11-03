@@ -43,7 +43,7 @@
 :- use_module(library(pce_util)).
 :- use_module(library(uri)).
 
-:- use_module(lsp_client).
+:- use_module(library(emacs/lsp_client)).
 
 /** <module> Handle LSP disagnostic messages
 
