@@ -29,12 +29,16 @@ moved into PceEmacs as well.  Notes:
 
 ### Using clangd
 
-The program `clangd` is a comprehensive LSP  for C and C++. Currently it
-is used to:
+The program `clangd` is a comprehensive LSP for C and C++.  PceEmacs
+uses it if it is in `PATH` (unless the Prolog flag `clangd` is `false`)
+to:
 
-  - Offer syntax highlighting
-  - Implement find-definition and find-references
-  - Show the `clangd` diagnostics in the margin.
+  - Offer semantic highlighting
+  - Implement find-definition (`M-.`) and find-references (`M-?`)
+  - Show the `clangd` diagnostics in the margin (`M-g n`, `M-g p`)
+  - Complete identifiers (dynamic abbreviation)
+
+This repository no longer adds anything for clangd.
 
 ### Using Vale-ls
 
