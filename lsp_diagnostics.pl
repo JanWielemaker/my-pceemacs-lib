@@ -79,10 +79,10 @@ lsp_diagnostic_style(lsp_diag_info,    [icon(Icon), underline(yellow)]) :-
 lsp_diagnostic_style(lsp_diag_hint,    [icon(Icon), underline(navyblue)]) :-
     lsp_icon(hint, Icon).
 
-lsp_icon(error,   '64x64/lsp-error.png').
-lsp_icon(warning, '64x64/lsp-warning.png').
-lsp_icon(info,    '64x64/lsp-information.png').
-lsp_icon(hint,    '64x64/lsp-hint.png').
+lsp_icon(error,   'ide/lsp/error.svg').
+lsp_icon(warning, 'ide/lsp/warning.svg').
+lsp_icon(info,    'ide/lsp/information.svg').
+lsp_icon(hint,    'ide/lsp/hint.svg').
 
 
                 /*******************************
@@ -598,9 +598,9 @@ fix_edits(_, _) =>
 
 %!  fix_icon(+Command:string, +Kind:string, -Icon) is det.
 
-fix_icon("clangd.applyTweak", _, '64x64/lsp-apply-tweak.png') :- !.
-fix_icon("clangd.applyFix",   _, '64x64/lsp-apply-fix.png')   :- !.
-fix_icon(_,                   _, '64x64/lsp-apply-fix.png').
+fix_icon("clangd.applyTweak", _, 'ide/lsp/apply-tweak.svg') :- !.
+fix_icon("clangd.applyFix",   _, 'ide/lsp/apply-fix.svg')   :- !.
+fix_icon(_,                   _, 'ide/lsp/apply-fix.svg').
 
 %   ->apply_change(+Title)
 %
@@ -657,9 +657,9 @@ add_dictionary_buttons(W, Fragment:emacs_lsp_diagnostic) :->
     get(LSP, config, Dict),
     memberchk(Code, Dict.get(spelling).get(codes)),
     get(Fragment?string, value, Word),
-    send(W, action_button, image('64x64/dictionary.png'),
+    send(W, action_button, image('ide/lsp/dictionary.svg'),
          'Accept (session)', message(W, accept, Word, session)),
-    send(W, action_button, image('64x64/dictionary.png'),
+    send(W, action_button, image('ide/lsp/dictionary.svg'),
          add_to_dictionary, message(W, accept, Word, dictionary)).
 
 accept(W, Word:name, Scope:{session,dictionary}) :->
