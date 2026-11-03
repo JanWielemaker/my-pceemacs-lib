@@ -31,7 +31,8 @@
 */
 
 :- module(lsp_registry,
-          [ lsp_server/3,               % ?Id, -Config
+          [ lsp_server/3,               % ?Id, +Root, -Config
+            lsp_mode_server/2,          % ?Mode, ?Id
             project_root/3              % +File, -Root, +Options
           ]).
 :- autoload(library(option), [option/3]).
@@ -51,18 +52,38 @@
 %!  lsp_server(?Id, +Root, -Config) is nondet.
 %
 %   True when Id is the identifier for a n LSP server to be started in a
-%   workspace at Root with given configuration Config.
+%   workspace at Root with given configuration Config.  Config is the
+%   configuration from lsp_server/2 with `arguments` set to the list
+%   of arguments from lsp_argument/3.
 
-lsp_server(clangd, Root,
+lsp_server(Id, Root, Config) :-
+    lsp_server(Id, Config0),
+    findall(Arg, lsp_argument(Id, Root, Arg), Argv),
+    Config = Config0.put(arguments, Argv).
+
+%!  lsp_mode_server(?Mode, ?Id) is nondet.
+%
+%   True when LSP server Id serves files in Mode.  This does not depend
+%   on the project, so it can be tested cheaply before finding the
+%   project root.
+
+lsp_mode_server(Mode, Id) :-
+    lsp_server(Id, Config),
+    memberchk(Mode, Config.modes).
+
+%!  lsp_server(?Id, -Config) is nondet.
+%
+%   Registry of LSP servers.  Config is a dict that contains at least
+%   `executable` and `modes`, the list of edit modes the server serves.
+%   Arguments that depend on the project are provided by lsp_argument/3.
+
+lsp_server(clangd,
            #{ executable: path(clangd),
-              arguments:  Argv,
               modes:      [c,cpp]
             }) :-
-    \+ current_prolog_flag(clangd, false),
-    findall(Arg, lsp_argument(clangd, Root, Arg), Argv).
-lsp_server('vale-ls', Root,
+    \+ current_prolog_flag(clangd, false).
+lsp_server('vale-ls',
            #{ executable: path('vale-ls'),
-              arguments:  Argv,
               modes:      [markdown,latex,html,c,prolog],
               change:     1,             % only full changes
               spelling:
@@ -70,15 +91,12 @@ lsp_server('vale-ls', Root,
                    dictionary: '~/.local/share/vale/styles/config/vocabularies/Project/accept.txt'
                  }
             }) :-
-    current_prolog_flag(vale, true),
-    findall(Arg, lsp_argument('vale-ls', Root, Arg), Argv).
+    current_prolog_flag(vale, true).
 /*
-lsp_server('ltex-ls', Root,
+lsp_server('ltex-ls',
            #{ executable: path('ltex-ls'),
-              arguments:  Argv,
               modes:      [markdown,latex,html]
-            }) :-
-    findall(Arg, lsp_argument('ltex-ls', Root, Arg), Argv).
+            }).
 */
 
 %!  lsp_argument(+Id, +Root, -Arg) is nondet.

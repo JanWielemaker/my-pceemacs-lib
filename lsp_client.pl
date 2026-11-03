@@ -123,6 +123,8 @@ ensure_lsp_server(Buffer, _File, _Mode, Clients) :-
     get(Buffer, attribute, lsp_clients, Clients),
     !.
 ensure_lsp_server(Buffer, File, Mode, Clients) :-
+    lsp_mode_server(Mode, _),
+    !,
     file_workspace(File, Mode, Workspace),
     get(Workspace, lsp_clients, Mode, Clients),
     send(Buffer, attribute, lsp_clients, Clients).
