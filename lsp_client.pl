@@ -445,7 +445,7 @@ token_mask_modifiers(LSP, Mask, ModID, List) :-
 code_action_kinds(LSP, Kinds:prolog) :<-
     "Get supported codeActionKinds as a list"::
     capabilities(LSP, Dict),
-    Provider = Dict.get(capabilities).get(codeActionProvider),
+    Provider = Dict.get(codeActionProvider),
     is_dict(Provider),
     Kinds = Provider.get(codeActionKinds).
 
