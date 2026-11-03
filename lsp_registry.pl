@@ -40,7 +40,6 @@
 :- use_module(library(debug), [debugging/1]).
 :- autoload(library(error), [must_be/2]).
 :- autoload(library(filesex), [directory_file_path/3]).
-:- autoload(library(pairs), [map_list_to_pairs/3]).
 
 :- multifile
     lsp_server/2,                       % ?LSPId, -Config
@@ -190,22 +189,19 @@ project_root(file, File, Root, _Options) :-
 
 %!  compile_commands_file(+Root, -File) is semidet.
 %
-%   True    when    File    is    the    absolute    file    path    for
-%   'compile_commands.json'.
+%   True when File is the absolute file path for the most recently
+%   modified `compile_commands.json` in Root or one of its `build*`
+%   subdirectories.
 
-compile_commands_file(_, File) :-
-    exists_file('compile_commands.json'),
-    absolute_file_name('compile_commands.json', File),
-    !.
 compile_commands_file(Root, File) :-
-    directory_file_path(Root, 'build*/compile_commands.json', Pattern),
-    expand_file_name(Pattern, Files),
-    map_list_to_pairs(time_file, Files, Pairs),
-    sort(1, >=, Pairs, [BuildTime-BuildFile|_]),
-    directory_file_path(Root, 'compile_commands.json', RootFile),
-    (   exists_file(RootFile),
-        time_file(RootFile, RootTime),
-        RootTime > BuildTime
-    ->  File = RootFile
-    ;   File = BuildFile
-    ).
+    findall(Time-F,
+            ( member(Rel, ['compile_commands.json',
+                           'build*/compile_commands.json']),
+              directory_file_path(Root, Rel, Pattern),
+              expand_file_name(Pattern, Files),
+              member(F, Files),
+              exists_file(F),
+              time_file(F, Time)
+            ),
+            Pairs),
+    sort(1, >=, Pairs, [_-File|_]).
