@@ -436,7 +436,7 @@ token_mask_modifiers(LSP, Mask, ModID, List) :-
     ModID1 is ModID+1,
     (   Mask /\ Bit =\= 0,
         token_modifier(LSP, ModID, H)
-    ->  Mask1 is Bit /\ \Bit,
+    ->  Mask1 is Mask /\ \Bit,
         List = [H|T],
         token_mask_modifiers(LSP, Mask1, ModID1, T)
     ;   token_mask_modifiers(LSP, Mask,  ModID1, List)
