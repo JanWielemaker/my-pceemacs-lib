@@ -38,9 +38,8 @@
 :- use_module(library(pce_util)).
 :- use_module(library(lists)).
 
-:- use_module(lsp_highlight).
-:- use_module(lsp_diagnostics).
-:- use_module(lsp_symbol_item).
+:- use_module(library(emacs/lsp_highlight)).
+:- use_module(library(emacs/lsp_symbol_item)).
 :- use_module(vale).
 
 /** <module> A PceEmacs C mode based on the `clangd` LSP
@@ -98,8 +97,6 @@ style(qualifier,       [colour(blue)]).
 style(definition,      [colour(blue)]).
 style(operator,        [colour(blue)]).
 
-style(Diagnostic,      Properties) :-
-    lsp_diagnostic_style(Diagnostic, Properties).
 
 
                 /*******************************

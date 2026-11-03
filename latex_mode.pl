@@ -3,8 +3,7 @@
 :- use_module(library(pce)).
 :- use_module(library(debug)).
 
-:- use_module(lsp_diagnostics).
-:- use_module(lsp_highlight).
+:- use_module(library(emacs/lsp_highlight)).
 :- use_module(vale).
 
 %:- debug(lsp(workspace)).
@@ -15,14 +14,6 @@
                 *            THEME             *
                 *******************************/
 
-:- multifile
-    emacs_latex_mode:style/2.
-
-emacs_latex_mode:def_style(Class, Attributes) :-
-    style(Class, Attributes).
-
-style(Diagnostic,      Properties) :-
-    lsp_diagnostic_style(Diagnostic, Properties).
 
 :- multifile
     emacs_latex_mode:lsp_configuration/2.

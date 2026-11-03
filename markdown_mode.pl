@@ -3,7 +3,6 @@
 :- use_module(library(pce)).
 :- use_module(library(debug)).
 
-:- use_module(lsp_diagnostics).
 :- use_module(vale).
 
 %:- debug(lsp(workspace)).
@@ -14,14 +13,6 @@
                 *            THEME             *
                 *******************************/
 
-:- multifile
-    emacs_markdown_mode:style/2.
-
-emacs_markdown_mode:def_style(Class, Attributes) :-
-    style(Class, Attributes).
-
-style(Diagnostic,      Properties) :-
-    lsp_diagnostic_style(Diagnostic, Properties).
 
 :- multifile
     emacs_markdown_mode:lsp_configuration/2.

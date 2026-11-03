@@ -34,7 +34,12 @@
           []).
 :- use_module(library(pce)).
 
-:- use_module(lsp_highlight).
+:- use_module(library(debug)).
+:- use_module(library(lists)).
+:- use_module(library(uri)).
+:- use_module(library(emacs/lsp_client)).
+:- use_module(library(emacs/lsp_highlight)).
+:- use_module(library(emacs/lsp_diagnostics)).
 
 :- multifile
     lsp_registry:lsp_server/2,
@@ -127,3 +132,173 @@ vale_check(M) :->
     ).
 
 :- emacs_end_mode.
+
+
+                /*******************************
+                *        REGION CHECKING       *
+                *******************************/
+
+% vale-ls can only check complete files.  To check part of a buffer, the
+% region is saved to a temporary file and checked.  The diagnostics it
+% gives are moved to the region by lsp_client (see
+% lsp_set_document_region/3).
+
+:- pce_extend_class(emacs_buffer).
+
+region_lsp(TB, LSP:lsp_client, Region:lsp_region_fragment) :<-
+    "Establish an LSP for a region"::
+    (   get(TB, attribute, att_region_lsp, Region)
+    ->  true
+    ;   new(Region, lsp_region_fragment(TB, LSP)),
+        send(TB, attribute, att_region_lsp, Region)
+    ).
+
+:- pce_end_class.
+
+:- pce_begin_class(lsp_region_fragment, fragment,
+                   "Used to mark region for an LSP to work on").
+
+variable(uri,	     name,       get, "Region URI").
+variable(lsp_client, lsp_client, get, "LSP we are connected to").
+variable(file,	     file,       get, "(Tmp) file connected").
+
+initialise(Region, TB:emacs_buffer, LSP:lsp_client) :->
+    send_super(Region, initialise, TB, 0, 0, lsp_region),
+    get(TB, attribute, lsp_tracking, DocumentURI),
+    file_name_extension(_, Ext, DocumentURI),
+    tmp_file_stream(TmpFile, Stream,
+                    [ encoding(utf8),
+                      extension(Ext)
+                    ]),
+    close(Stream),
+    uri_file_name(RegionURI, TmpFile),
+    send(Region, slot, uri,        RegionURI),
+    send(Region, slot, lsp_client, LSP),
+    send(Region, slot, file,       TmpFile),
+    get(TB, mode, Mode),
+    send(LSP, notify,
+         'textDocument/didOpen'(
+             #{textDocument:
+                 #{ uri: RegionURI,
+                    languageId: Mode,
+                    version: 1,
+                    text: ""
+                  }
+              })),
+    debug(vale(region), 'Established region using ~q', [TmpFile]).
+
+unlink(Region) :->
+    "Cleanup registration"::
+    get(Region, text_buffer, TB),
+    ignore(send(TB, delete_attribute, att_region_lsp)),
+    get(Region, uri, RegionURI),
+    lsp_delete_document_region(RegionURI),
+    get(Region?file, absolute_path, TmpFile),
+    catch(delete_file(TmpFile), _, true),
+    send_super(Region, unlink).
+
+range(Region, Start:start=int, End:end=int) :->
+    "Set extends"::
+    send(Region, start, Start, @off),
+    send(Region, end, End).
+
+did_save(Region) :->
+    "Save content to file and notify LSP using didSave()"::
+    get(Region, text_buffer, TB),
+    get(TB, attribute, lsp_tracking, DocumentURI),
+    get(Region, string, string(Text)),
+    get(Region, start, Start),
+    get(Region, end, End),
+    send(TB, do_save, Region?file, Start, End),
+    get(Region, uri, RegionURI),
+    debug(vale(region), 'Using didSave to check ~d..~d',
+          [Start, End]),
+    lsp_set_document_region(RegionURI, DocumentURI, Region),
+    send(Region?lsp_client, notify,
+         'textDocument/didSave'(
+             #{ textDocument:
+                  #{ uri: RegionURI
+                   },
+                text: Text
+              })).
+
+:- pce_end_class.
+
+
+                /*******************************
+                *           SPELLING           *
+                *******************************/
+
+:- dynamic
+    session_dictionary/1.
+
+:- multifile
+    lsp_diagnostics:suppress_diagnostic/5,
+    lsp_diagnostics:diagnostic_buttons/2.
+
+lsp_diagnostics:suppress_diagnostic(Buffer, LSP, StartOffset, Length, Diagnostic) :-
+    get(LSP, config, Config),
+    SpellingCodes = Config.get(spelling).get(codes),
+    atom_string(SpellingCode, Diagnostic.get(code)),
+    memberchk(SpellingCode, SpellingCodes),
+    get(Buffer, contents, StartOffset, Length, string(String)),
+    atom_string(Word, String),
+    session_dictionary(Word).
+
+lsp_diagnostics:diagnostic_buttons(W, Fragment) :-
+    send(W, add_dictionary_buttons, Fragment).
+
+:- pce_extend_class(emacs_lsp_diagnostic_window).
+
+% Deal   with   suppressing   and   dictionary   additions.   Some   LSP
+% implementation do this for you,  some  don't.   In  that  case the LSP
+% registration should contain a key `spelling` with values `code` set to
+% the diagnostic code emitted  for   spelling  errors  and `dictionary`,
+% pointing at a file that is used for the user dictionary.
+
+%   ->add_dictionary_buttons(+Fragment)
+%
+%   Added _accept_ and _dictionary_  buttons  if   this  is  a  spelling
+%   correction action and the LSP registry asks us to.
+
+add_dictionary_buttons(W, Fragment:emacs_lsp_diagnostic) :->
+    "Add buttons for accept and dictionary"::
+    get(Fragment, code, Code),
+    get(Fragment, lsp_client, LSP),
+    get(LSP, config, Dict),
+    memberchk(Code, Dict.get(spelling).get(codes)),
+    get(Fragment?string, value, Word),
+    send(W, action_button, image('ide/lsp/dictionary.svg'),
+         'Accept (session)', message(W, accept, Word, session)),
+    send(W, action_button, image('ide/lsp/dictionary.svg'),
+         add_to_dictionary, message(W, accept, Word, dictionary)).
+
+accept(W, Word:name, Scope:{session,dictionary}) :->
+    "Accept a word marked as spelling error"::
+    get(W, hypered, fragment, Fragment),
+    (   Scope == session
+    ->  asserta(session_dictionary(Word))
+    ;   get(Fragment, lsp_client, LSP),
+        get(LSP, config, Dict),
+        FileSpec = Dict.get(spelling).get(dictionary),
+        dictionary_file(FileSpec, File),
+        setup_call_cleanup(
+            open(File, append, Out,
+                 [ encoding(utf8)
+                 ]),
+            format(Out, '~w~n', [Word]),
+            close(Out))
+    ),
+    same_diagnostics(Fragment, All),
+    forall(member(F, All),
+           send(F, free)).
+
+dictionary_file(FileSpec, File) :-
+    atomic(FileSpec),
+    expand_file_name(FileSpec, [File]).
+dictionary_file(FileSpec, File) :-
+    absolute_file_name(FileSpec, File,
+                       [ access(write)
+                       ]).
+
+:- pce_end_class.

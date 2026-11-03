@@ -35,7 +35,6 @@
 :- use_module(library(prolog_xref)).
 
 :- use_module(autocomplete).
-:- use_module(lsp_diagnostics).
 :- use_module(vale).
 
 
@@ -43,14 +42,6 @@
                 *            THEME             *
                 *******************************/
 
-:- multifile
-    emacs_prolog_mode:style/2.
-
-emacs_prolog_mode:def_style(Class, Attributes) :-
-    style(Class, Attributes).
-
-style(Diagnostic,      Properties) :-
-    lsp_diagnostic_style(Diagnostic, Properties).
 
 :- multifile
     emacs_prolog_mode:lsp_configuration/2.
