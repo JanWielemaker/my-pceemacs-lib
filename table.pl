@@ -16,7 +16,10 @@
 %:- use_module('/oorlam/jan/src/boot/lib/pretty_print').
 
 :- emacs_extend_mode(language,
-		     [
+		     [ tabularise           = command,
+		       tabularise_selection = command,
+		       tabularise_regex     = command,
+		       align_comment        = command
 		     ]).
 
 :- pce_global(@emacs_white_regex,     new(regex(string('[ \t]*')))).
