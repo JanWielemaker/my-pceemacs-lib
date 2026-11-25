@@ -41,7 +41,7 @@ tabularise(M, From:[int], To:[int], Sep:[regex]) :->
 	align_columns(M, TermList),
 	free_fragments(TermList),
 	send(M, align_comment, From, To).
-	
+
 tabularise_regex(M, F0:[int], T0:[int], Sep:regex) :->
 	"Tabularise based on separator regex"::
 	send(M, tabularise, F0, T0, Sep).
@@ -94,7 +94,7 @@ get_term(M, S, EOL, E, new(_, fragment(TB, TS, FL, term))) :-
 	E is E0+L,
 	get(TB, scan, S, term, 1, start, TS),
 	FL is E-TS.
-	
+
 %	line_columns(+M, +S, +E, +Sep, -FragmentList)
 
 line_columns(M, S, E, Sep,
@@ -119,7 +119,7 @@ line_columns(M, S, E, _, [new(_, fragment(TB, S1, FL, term))]) :-
 %	format('E=~w, E=~w~n', [E, E1]),
 	FL is E1+1-S1.
 line_columns(_, _, _, _, []).
-	
+
 %	align_columns(+Mode, +TermList)
 %
 %	Align all columns from th given termlist
@@ -135,7 +135,7 @@ align_columns(_, _, _).
 
 align_column(M, TermList, N) :-
 	(   N > 1
-	->  do_align_column(M, TermList, N, 0) 	% minimise white space
+	->  do_align_column(M, TermList, N, 0)	% minimise white space
 	;   true				% but not for the first line
 	),
 	col_start(M, TermList, N, -1, Start),
@@ -182,7 +182,7 @@ create_fragments([H|T]) :-
 	create_fragments(T).
 create_fragments(new(Ref, Term)) :-
 	new(Ref, Term).
-	
+
 free_fragments([]).
 free_fragments([H|T]) :-
 	free_fragments(H),
@@ -190,16 +190,15 @@ free_fragments([H|T]) :-
 free_fragments(new(Ref, _)) :-
 	free(Ref).
 
-	
+
 		 /*******************************
 		 *	      COMMENT		*
 		 *******************************/
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Comment at the end of a line looks better if all comment is right of all
-code. This function finds all line-comment in  the region as well as all
-code in the region and places  the   comment  aligned  ansd right of the
-code.
+code.  This function finds all line-comment in the region as well as all
+code in the region and places the comment aligned and right of the code.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 align_comment(M, From:[int], To:[int]) :->
@@ -211,12 +210,12 @@ align_comment(M, From:[int], To:[int]) :->
 		 message(M, max_content_line_column, @arg1, Col)),
 	    get(Col, value, C0),
 	    get(M, tab_distance, TD),
-	    CommentCol is ((C0+TD-1)//TD)*TD, 		% round to tab
+	    CommentCol is ((C0+TD-1)//TD)*TD,		% round to tab
 	    send(M, for_lines_in_region, From, To,
 		 message(M, align_line_comment, CommentCol, @arg1))
 	;   true
 	).
-	    
+
 
 align_line_comment(M, Column:int, From:[int]) :->
 	"Align line-comment (if any) to column"::
