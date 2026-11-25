@@ -35,7 +35,7 @@ tabularise(M, From:[int], To:[int], Sep:[regex]) :->
 %	nl, pretty_print(TermList),
 	send(M, unshow_terms),
 	create_fragments(TermList),
-	align_columns(TermList),
+	align_columns(M, TermList),
 	free_fragments(TermList),
 	send(M, align_comment, From, To).
 	
@@ -59,7 +59,8 @@ identify_terms(M, S, E, Sep, [L0|L]) :-
 	    \+ L0 = [_]			% just one, break up
 	->  true
 	;   new(Re, regex('[({[]')),	% go into the term
-	    send(Re, search, M, S, EOL),
+	    get(M, text_buffer, TB),
+	    send(Re, search, TB, S, EOL),
 	    get(Re, register_end, 0, S2),
 	    line_terms(M, S2, EOC, L0)
 	),
@@ -83,7 +84,7 @@ line_terms(M, S, EOL, [T0|T]) :-
 	line_terms(M, E, EOL, T).
 line_terms(_, _, _, []).
 
-get_term(M, S, EOL, E, new(_, fragment(M, TS, FL, term))) :-
+get_term(M, S, EOL, E, new(_, fragment(TB, TS, FL, term))) :-
 	get(M, text_buffer, TB),
 	get(TB, scan, S, term, 1, end, E0),
 	get(@emacs_non_white_regex, match, TB, E0, EOL, L),
@@ -94,8 +95,8 @@ get_term(M, S, EOL, E, new(_, fragment(M, TS, FL, term))) :-
 %	line_columns(+M, +S, +E, +Sep, -FragmentList)
 
 line_columns(M, S, E, Sep,
-	     [ new(_, fragment(M, FS1, FL1, term)),
-	       new(_, fragment(M, FS2, FL2, term))
+	     [ new(_, fragment(TB, FS1, FL1, term)),
+	       new(_, fragment(TB, FS2, FL2, term))
 	     | L
 	     ]) :-
 	get(M, text_buffer, TB),
@@ -107,7 +108,7 @@ line_columns(M, S, E, Sep,
 	FL1 is FE1-FS1,
 	FL2 is FE2-FS2,
 	line_columns(M, FE2, E, Sep, L).
-line_columns(M, S, E, _, [new(_, fragment(M, S1, FL, term))]) :-
+line_columns(M, S, E, _, [new(_, fragment(TB, S1, FL, term))]) :-
 	get(M, text_buffer, TB),
 	get(TB, skip_layout, S, forward, @off, S1),
 	get(TB, skip_layout, E-1, backward, E1),
@@ -116,46 +117,46 @@ line_columns(M, S, E, _, [new(_, fragment(M, S1, FL, term))]) :-
 	FL is E1+1-S1.
 line_columns(_, _, _, _, []).
 	
-%	align_columns(TermList)
+%	align_columns(+Mode, +TermList)
 %
 %	Align all columns from th given termlist
 
-align_columns(TermList) :-
-	align_columns(TermList, 1).
+align_columns(M, TermList) :-
+	align_columns(M, TermList, 1).
 
-align_columns(TermList, N) :-
-	align_column(TermList, N), !,
+align_columns(M, TermList, N) :-
+	align_column(M, TermList, N), !,
 	NN is N + 1,
-	align_columns(TermList, NN).
-align_columns(_, _).
+	align_columns(M, TermList, NN).
+align_columns(_, _, _).
 
-align_column(TermList, N) :-
+align_column(M, TermList, N) :-
 	(   N > 1
-	->  do_align_column(TermList, N, 0) 	% minimise white space
+	->  do_align_column(M, TermList, N, 0) 	% minimise white space
 	;   true				% but not for the first line
 	),
-	col_start(TermList, N, -1, Start),
-	do_align_column(TermList, N, Start).
+	col_start(M, TermList, N, -1, Start),
+	do_align_column(M, TermList, N, Start).
 
-col_start([], _, S, S) :- !,
+col_start(_, [], _, S, S) :- !,
 	S >= 0.
-col_start([L0|T], C, S0, S) :-
-	nth1(C, L0, new(F, fragment(M, _, _, _))), !,
+col_start(M, [L0|T], C, S0, S) :-
+	nth1(C, L0, new(F, fragment(_, _, _, _))), !,
 	get(F, start, FS),
 	get(M, column, FS, S1),
 	S2 is max(S0, S1),
-	col_start(T, C, S2, S).
-col_start([_|T], C, S0, S) :-
-	col_start(T, C, S0, S).
+	col_start(M, T, C, S2, S).
+col_start(M, [_|T], C, S0, S) :-
+	col_start(M, T, C, S0, S).
 
-do_align_column([], _, _) :- !.
-do_align_column([L0|T], C, Start) :-
-	nth1(C, L0, new(F, fragment(M, _, _, _))), !,
+do_align_column(_, [], _, _) :- !.
+do_align_column(M, [L0|T], C, Start) :-
+	nth1(C, L0, new(F, fragment(_, _, _, _))), !,
 	get(F, start, S),
 	align_if_loose(M, S, Start),
-	do_align_column(T, C, Start).
-do_align_column([_|T], C, Start) :-
-	do_align_column(T, C, Start).
+	do_align_column(M, T, C, Start).
+do_align_column(M, [_|T], C, Start) :-
+	do_align_column(M, T, C, Start).
 
 %	->align, but only if the target is at the start of a line
 %	or preceded by blank space.
